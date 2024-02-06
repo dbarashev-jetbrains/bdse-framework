@@ -1,0 +1,35 @@
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasProto";
+import "google/protobuf/wrappers.proto";
+
+// Сообщение-запрос метода GetValue. В нём только ключ искомого значения.
+message KvasGetRequest {
+    string key = 1;
+}
+
+// Сообщение-ответ метода GetValue от сервера.
+message KvasGetResponse {
+    // Значение в хранилище может отсутствовать. В таком случае поле value в ответе нужно оставить пустым,
+    // и тогда метод KvasGetResponse::hasValue будет возвращать false.
+    google.protobuf.StringValue value = 1;
+}
+
+// Запрос метода PutValue
+message KvasPutRequest {
+    // Ключ, значение которого нужно обновить.
+    string key = 1;
+    // Новое значение для данного ключа.
+    string value = 2;
+}
+
+// Ответ метода PutValue.
+message KvasPutResponse {
+    // Просто пустое.
+}
+
+// Интерфейс сервера.
+service Kvas {
+    rpc GetValue(KvasGetRequest) returns (KvasGetResponse) {}
+    rpc PutValue(KvasPutRequest) returns (KvasPutResponse) {}
+}

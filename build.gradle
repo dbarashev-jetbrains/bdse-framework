@@ -1,0 +1,27 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '1.9.22' apply false
+}
+
+subprojects {
+    ext.kotlinVersion = '1.9.22'
+    ext.grpcVersion = '1.61.1'
+
+    buildscript {      // Configuration for building
+        repositories {
+            google()
+            gradlePluginPortal()
+            mavenCentral()
+        }
+        dependencies {
+            classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}"
+        }
+    }
+
+    repositories {
+        maven {
+            url 'https://maven-central.storage.googleapis.com'             // Google's mirror of Maven Central
+        }
+        mavenCentral()
+        mavenLocal()
+    }
+}
