@@ -12,6 +12,7 @@ import io.grpc.ManagedChannel
 import io.grpc.ManagedChannelBuilder
 import kvas.proto.KvasGrpc
 import kvas.proto.kvasGetRequest
+import kvas.proto.kvasPutRequest
 
 /**
  * Реализация клиента, общающаяся с GRPC сервером.
@@ -22,6 +23,13 @@ class KvasClient(channel: ManagedChannel) {
   fun get(key: String): String? {
     val resp = syncStub.getValue(kvasGetRequest { this.key = key })
     return if (resp.hasValue()) resp.value.value else null
+  }
+
+  fun put(key: String, value: String) {
+    syncStub.putValue(kvasPutRequest {
+      this.key = key
+      this.value = value
+    })
   }
 }
 
@@ -53,4 +61,15 @@ class Get : CliktCommand(name = "get") {
     println(kvasClient.get(key))
   }
 }
-fun main(args: Array<String>) = Main().subcommands(Get()).main(args)
+
+class Put : CliktCommand(name = "put") {
+  val key by argument()
+  val value by argument()
+  val kvasClient by requireObject<KvasClient>()
+  override fun run() {
+    kvasClient.put(key, value)
+    println("Kvas::putValue completed")
+  }
+
+}
+fun main(args: Array<String>) = Main().subcommands(Get(), Put()).main(args)
