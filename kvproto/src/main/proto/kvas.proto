@@ -3,33 +3,99 @@ option java_package = "kvas.proto";
 option java_outer_classname = "KvasProto";
 import "google/protobuf/wrappers.proto";
 
-// Сообщение-запрос метода GetValue. В нём только ключ искомого значения.
+// Request to get a value by the specified key. The client must supply the request with
+// a shard_token value to let the node check if the request is routed correctly.
 message KvasGetRequest {
     string key = 1;
+    int32 shard_token = 2;
 }
 
-// Сообщение-ответ метода GetValue от сервера.
+// Response to GetValue request.
 message KvasGetResponse {
-    // Значение в хранилище может отсутствовать. В таком случае поле value в ответе нужно оставить пустым,
-    // и тогда метод KvasGetResponse::hasValue будет возвращать false.
+    enum StatusCode {
+        // The request was processed by the node and the response is correct.
+        OK = 0;
+        // The node believes that the client needs to refresh its information about the shards
+        // registered in the system.
+        REFRESH_SHARDS = 1;
+    }
+    // The requested value. If the value is missing in the storage, this field shall be empty and
+    // KvasGetResponse::hasValue will return false.
     google.protobuf.StringValue value = 1;
+
+    // Status code. The client must check the status code and do what the status code instructs.
+    StatusCode code = 2;
 }
 
-// Запрос метода PutValue
+// Request to put a value by the specified key. The client must supply the request with
+// a shard_token value to let the node check if the request is routed correctly.
+// In case if there is already such key in the storage, the node must update the value.
 message KvasPutRequest {
-    // Ключ, значение которого нужно обновить.
+    // Key the value shall be associated with.
     string key = 1;
-    // Новое значение для данного ключа.
+    // New value for this key.
     string value = 2;
+
+    // Shard token from the metadata known to the client.
+    int32 shard_token = 3;
 }
 
-// Ответ метода PutValue.
+// Response to PutValue request
 message KvasPutResponse {
-    // Просто пустое.
+    enum StatusCode {
+        // The request was processed by the node and the response is correct.
+        OK = 0;
+        // The node believes that the client needs to refresh its information about the shards
+        // registered in the system.
+        REFRESH_SHARDS = 1;
+    }
+    // Status code. The client must check the status code and do what the status code instructs.
+    StatusCode code = 1;
+}
+
+// Shard information includes a node IP:port address and an integer token.
+// The meaning of token value depends on the chosen sharding function.
+//
+// For a simple "hash value modulo the number of nodes" it is a remainder of the hash value
+// divided by the number of shards.
+// For consistent hashing, it is the upper bound of the ring segment served by this node.
+message ShardInfo {
+    string node_address = 1;
+    int32 shard_token = 2;
+}
+
+// Shard must periodically send this request to the master node to register itself in the system, or
+// refresh the membership.
+// If the node is already registered, it must supply the assigned token.
+message RegisterShardRequest {
+    string node_address = 1;
+    google.protobuf.Int32Value shard_token = 2;
+}
+
+message RegisterShardResponse {
+    enum StatusCode {
+        // Shard was registered successfully
+        OK = 0;
+        // Registration failed because the token conflicts with some other node.
+        TOKEN_CONFLICT = 1;
+    }
+    int32 shard_token = 1;
+}
+
+// A client may send this request to the master node to get a list of registered shards.
+message GetShardsRequest {
+}
+
+// Response to GetShards request.
+message GetShardsResponse {
+    repeated ShardInfo shards = 1;
 }
 
 // Интерфейс сервера.
 service Kvas {
     rpc GetValue(KvasGetRequest) returns (KvasGetResponse) {}
     rpc PutValue(KvasPutRequest) returns (KvasPutResponse) {}
+
+    rpc RegisterShard(RegisterShardRequest) returns (RegisterShardResponse) {}
+    rpc GetShards(GetShardsRequest) returns (GetShardsResponse) {}
 }
