@@ -21,6 +21,8 @@ class Main : CliktCommand() {
   val dbDatabase: String by option(help = "Database name").default("")
 
   val grpcPort: Int by option(help = "Kvas GRPC port number").int().default(9000)
+  val master: String by option(help = "Master address in IP:PORT format").default("")
+  val selfAddress: String by option(help = "This node address in IP:PORT format").default("")
   override fun run() {
     if (dbHost != "none") {
       val hikariConfig = HikariConfig().apply {
@@ -42,9 +44,16 @@ class Main : CliktCommand() {
         println("Postgres connection failed")
       }
     }
-    ServerBuilder.forPort(grpcPort).addService(KvasGrpcServer()).build().start().also {
-      println("GRPC Server started. Hit Ctrl+C to stop")
-      it.awaitTermination()
+    if (master.isNotBlank()) {
+      ServerBuilder.forPort(grpcPort).addService(KvasGrpcServerNode(selfAddress, master)).build().start().also {
+        println("KVAS node started. Hit Ctrl+C to stop")
+        it.awaitTermination()
+      }
+    } else {
+      ServerBuilder.forPort(grpcPort).addService(KvasGrpcServerMaster(selfAddress)).build().start().also {
+        println("KVAS master started. Hit Ctrl+C to stop")
+        it.awaitTermination()
+      }
     }
   }
 }

@@ -19,7 +19,8 @@ repositories {
 
 dependencies {
     implementation 'com.google.protobuf:protobuf-java-util:3.22.2'
-    implementation 'com.google.protobuf:protobuf-kotlin:3.22.2'
+    api 'com.google.protobuf:protobuf-kotlin:3.22.2'
+    api "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0"
     implementation "io.grpc:grpc-api:$grpcVersion"
     implementation "io.grpc:grpc-protobuf:$grpcVersion"
     implementation "io.grpc:grpc-kotlin-stub:1.+"

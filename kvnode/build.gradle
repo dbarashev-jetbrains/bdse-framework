@@ -23,6 +23,7 @@ dependencies {
     implementation 'org.postgresql:postgresql:42.6.0'
     implementation "com.github.ajalt.clikt:clikt:4.1.0"
 
+    implementation "ch.qos.logback:logback-classic:1.4.6"
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.+'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
 }
