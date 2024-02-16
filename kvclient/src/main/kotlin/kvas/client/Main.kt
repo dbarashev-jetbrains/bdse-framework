@@ -11,25 +11,60 @@ import com.github.ajalt.clikt.parameters.types.int
 import io.grpc.ManagedChannel
 import io.grpc.ManagedChannelBuilder
 import kvas.proto.KvasGrpc
+import kvas.proto.KvasGrpc.KvasFutureStub
+import kvas.proto.KvasProto.ShardInfo
+import kvas.proto.getShardsRequest
 import kvas.proto.kvasGetRequest
 import kvas.proto.kvasPutRequest
+import kvas.util.*
+import kvas.util.LinearHashing.shardNumber
+import org.slf4j.LoggerFactory
+import java.lang.RuntimeException
+import java.util.concurrent.ExecutionException
 
 /**
  * Реализация клиента, общающаяся с GRPC сервером.
  */
 class KvasClient(channel: ManagedChannel) {
-  private val syncStub = KvasGrpc.newBlockingStub(channel)
+  private val masterStub = KvasGrpc.newBlockingStub(channel)
+  private val nodeStubs = mutableMapOf<String, KvasFutureStub>()
+  private val log = LoggerFactory.getLogger("Client")
+
+  fun getNodeForKey(key: String): ShardInfo {
+    val shardList = masterStub.getShards(getShardsRequest {  }).shardsList
+    val shardNumber = shardNumber(key, shardList.size)
+    return shardList.find { it.shardToken == shardNumber }?.nodeAddress?.let {
+      ShardInfo.newBuilder().setNodeAddress(it).setShardToken(shardNumber).build()
+    } ?: throw RuntimeException("Can't find a shard with number $shardNumber")
+  }
+
+  fun getNodeStub(address: String) = nodeStubs.getOrPut(address) {
+    kvasync(address.toHostPort().first, address.toHostPort().second)
+  }
 
   fun get(key: String): String? {
-    val resp = syncStub.getValue(kvasGetRequest { this.key = key })
-    return if (resp.hasValue()) resp.value.value else null
+    getNodeForKey(key).let {shard ->
+      val resp = getNodeStub(shard.nodeAddress).getValue(kvasGetRequest {
+        this.key = key
+        this.shardToken = shard.shardToken
+      }).get()
+      return if (resp.hasValue()) resp.value.value else null
+    }
   }
 
   fun put(key: String, value: String) {
-    syncStub.putValue(kvasPutRequest {
-      this.key = key
-      this.value = value
-    })
+    getNodeForKey(key).let {shard ->
+      try {
+        getNodeStub(shard.nodeAddress).putValue(kvasPutRequest {
+          this.key = key
+          this.shardToken = shard.shardToken
+          this.value = value
+        }).get()
+      } catch (ex: ExecutionException) {
+        log.error("Failed to put key={} on shard={}", key, shard)
+        ex.printStackTrace()
+      }
+    }
   }
 }
 

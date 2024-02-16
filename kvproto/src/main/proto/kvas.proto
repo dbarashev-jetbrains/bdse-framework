@@ -3,6 +3,12 @@ option java_package = "kvas.proto";
 option java_outer_classname = "KvasProto";
 import "google/protobuf/wrappers.proto";
 
+// Just a key-value pair
+message KeyValue {
+    string key = 1;
+    string value = 2;
+}
+
 // Request to get a value by the specified key. The client must supply the request with
 // a shard_token value to let the node check if the request is routed correctly.
 message KvasGetRequest {
@@ -72,14 +78,19 @@ message RegisterShardRequest {
     google.protobuf.Int32Value shard_token = 2;
 }
 
+// In the response master send the status and the list of the currently available shards.
 message RegisterShardResponse {
     enum StatusCode {
         // Shard was registered successfully
         OK = 0;
         // Registration failed because the token conflicts with some other node.
         TOKEN_CONFLICT = 1;
+        //
+        OTHER = 2;
     }
     int32 shard_token = 1;
+    StatusCode code = 2;
+    repeated ShardInfo shards = 3;
 }
 
 // A client may send this request to the master node to get a list of registered shards.
@@ -91,11 +102,18 @@ message GetShardsResponse {
     repeated ShardInfo shards = 1;
 }
 
-// Интерфейс сервера.
+message MoveDataRequest {
+    int32 destination_shard_token = 1;
+    repeated ShardInfo shards = 2;
+}
+
+// GRPC server interface.
 service Kvas {
     rpc GetValue(KvasGetRequest) returns (KvasGetResponse) {}
     rpc PutValue(KvasPutRequest) returns (KvasPutResponse) {}
 
     rpc RegisterShard(RegisterShardRequest) returns (RegisterShardResponse) {}
     rpc GetShards(GetShardsRequest) returns (GetShardsResponse) {}
+
+    rpc MoveData(MoveDataRequest) returns (stream KeyValue){}
 }
