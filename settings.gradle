@@ -1,4 +1,5 @@
 include 'kvclient'
+include 'kvloadtest'
 include 'kvnode'
 include 'kvproto'
 
