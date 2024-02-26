@@ -22,7 +22,7 @@ class Main : CliktCommand() {
 
   val grpcPort: Int by option(help = "Kvas GRPC port number").int().default(9000)
   val master: String by option(help = "Master address in IP:PORT format").default("")
-  val selfAddress_: String by option(help = "This node address in IP:PORT format").default("")
+  val selfAddress_: String by option(help = "This node address in IP:PORT format", names = arrayOf("--self-address")).default("")
   override fun run() {
     val selfAddress = if (selfAddress_ == "") {
       "127.0.0.1:$grpcPort"
