@@ -43,3 +43,27 @@ The server command line arguments can be printed with:
   By default the client talks to the server running on `localhost:9000`
 
 
+### Local multi-node setup 
+
+If you need to run multiple KVAS servers on your local machine in a single cluster, you need to:
+
+- assign a different port to every instance using `--grpc-port` command-line argument.
+- let them know the master node address (IP:PORT) using `--master` command line argument.
+- let every instance know its own full address (IP:PORT) using `--self-address` argument. This is a technically not necessary when they run outside of docker containers, and can use `127.0.0.1`, however it will be necessary if KVAS is running in a Docker container, where "localhost" or "127.0.0.1" resolves inside the container itself.
+
+Every kvnode instance will most likely need its own PostgreSQL storage. 
+
+An example of running a cluster with a master node and one worker, talking to their own PostgreSQL instances may look as follows: 
+```shell
+# PostgreSQL storage for the master node
+docker run -d -p 5430:5432 --name postgres-0 -e POSTGRES_HOST_AUTH_METHOD=trust postgres
+
+# PostgreSQL storage for the worker node
+docker run -d -p 5431:5432 --name postgres-1 -e POSTGRES_HOST_AUTH_METHOD=trust postgres
+
+# master kvnode
+gradle :kvnode:run --args='--grpc-port 9000 --self-address 127.0.0.1:9000 --db-port 5430'
+
+# worker kvnode
+gradle :kvnode:run --args='--grpc-port 9001 --self-address 127.0.0.1:9001 --db-port 5431 --master 127.0.0.1:9000'
+```
