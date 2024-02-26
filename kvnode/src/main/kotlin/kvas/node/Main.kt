@@ -22,8 +22,11 @@ class Main : CliktCommand() {
 
   val grpcPort: Int by option(help = "Kvas GRPC port number").int().default(9000)
   val master: String by option(help = "Master address in IP:PORT format").default("")
-  val selfAddress: String by option(help = "This node address in IP:PORT format").default("")
+  val selfAddress_: String by option(help = "This node address in IP:PORT format").default("")
   override fun run() {
+    val selfAddress = if (selfAddress_ == "") {
+      "127.0.0.1:$grpcPort"
+    } else selfAddress_
     if (dbHost != "none") {
       val hikariConfig = HikariConfig().apply {
         username = dbUser
@@ -46,12 +49,12 @@ class Main : CliktCommand() {
     }
     if (master.isNotBlank()) {
       ServerBuilder.forPort(grpcPort).addService(KvasGrpcServerNode(selfAddress, master)).build().start().also {
-        println("KVAS node started. Hit Ctrl+C to stop")
+        println("KVAS node started with self-address $selfAddress and master address $master. Hit Ctrl+C to stop")
         it.awaitTermination()
       }
     } else {
       ServerBuilder.forPort(grpcPort).addService(KvasGrpcServerMaster(selfAddress)).build().start().also {
-        println("KVAS master started. Hit Ctrl+C to stop")
+        println("KVAS master started with self-address $selfAddress. Hit Ctrl+C to stop")
         it.awaitTermination()
       }
     }
