@@ -18,7 +18,8 @@
     <logger name="Node.GetValue" level="DEBUG" />
     <logger name="Node.PutValue" level="DEBUG" />
     <logger name="Node.MoveData" level="DEBUG" />
-    <logger name="Master.RegisterShard" level="DEBUG" />
+    <logger name="Master.RegisterItself" level="INFO" />
+    <logger name="Master.RegisterShard" level="INFO" />
     <logger name="com.zaxxer.hikari" level="INFO"/>
     <logger name="io.grpc.netty.NettyServerHandler" level="INFO"/>
 </configuration>

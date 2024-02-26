@@ -1,3 +1,7 @@
+// This file include a reference implementation of the KVAS node. You can copy this code if necessary, or may inherit
+// from this code if it makes sense, but most likely your own KVAS node implementation will be considerably different.
+//
+// Sharding: this code implements linear hashing sharding method.
 package kvas.node
 
 import com.google.protobuf.Int32Value
@@ -11,7 +15,7 @@ import kvas.proto.KvasProto.KvasGetResponse
 import kvas.proto.KvasProto.RegisterShardRequest
 import kvas.proto.KvasProto.RegisterShardResponse.StatusCode
 import kvas.proto.KvasProto.ShardInfo
-import kvas.util.LinearHashing.clearHighestBit
+import kvas.util.LinearHashing
 import kvas.util.LinearHashing.shardNumber
 import kvas.util.kvas
 import kvas.util.toHostPort
@@ -21,7 +25,10 @@ import kotlin.concurrent.timer
 
 
 /**
- * This is base class for both master and node servers. It responds to get/putValue and moveData requests.
+ * This is base class for both master and node servers. It stores the data in-memory and
+ * responds to get/putValue and moveData requests.
+ *
+ * There is a dependency on linear hashing in moveData implementation.
  */
 open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCoroutineImplBase() {
   // In-memory storage
@@ -33,6 +40,8 @@ open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCo
   /**
    * getValue returns success if the token supplier in the request matches this node token, that means that
    * the client has up-to-date information about the shard distribution.
+   *
+   * Please refer to ShardInfo protocol buffer docs in kvas.proto file for the meaning of shard_token value.
    */
   override suspend fun getValue(request: KvasGetRequest): KvasGetResponse =
     token?.let {
@@ -52,6 +61,8 @@ open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCo
   /**
    * putValue returns success if the token supplier in the request matches this node token, that means that
    * the client has up-to-date information about the shard distribution.
+   *
+   * Please refer to ShardInfo protocol buffer docs in kvas.proto file for the meaning of shard_token value.
    */
   override suspend fun putValue(request: KvasProto.KvasPutRequest): KvasProto.KvasPutResponse {
     val log = LoggerFactory.getLogger("Node.PutValue")
@@ -67,14 +78,17 @@ open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCo
     } ?: run {
       kvasPutResponse { code = KvasProto.KvasPutResponse.StatusCode.REFRESH_SHARDS }
     }
-    return response.also {
-      log.debug("response={}", it)
-    }
+    return response
   }
   protected fun putValue(entry: KeyValue) {
     key2value[entry.key] = entry.value
   }
 
+  /**
+   * This function returns a stream of key-value pair that should be moved to the node where the request was issued from.
+   * The keys to move are defined by the linear hashing sharding method.
+   * The moved entries are removed from the in-memory storage immediately.
+   */
   override fun moveData(request: KvasProto.MoveDataRequest): Flow<KvasProto.KeyValue> {
     val log = LoggerFactory.getLogger("Node.MoveData")
     log.debug("request={}", request)
@@ -90,7 +104,7 @@ open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCo
 
 
 /**
- * This is master node. It adds methods for registering and listing the shards.
+ * This is the master node. It adds methods for registering and listing the shards.
  */
 class KvasGrpcServerMaster(selfAddress: String) : KvasGrpcServer(selfAddress) {
   // Shard mapping, maps shard tokens to node addresses.
@@ -156,6 +170,11 @@ class KvasGrpcServerMaster(selfAddress: String) : KvasGrpcServer(selfAddress) {
   }
 }
 
+/**
+ * This is the worked node implementation. It continuously registers itself at the master node.
+ * When it registers the first time, it receives a shard token and copies some data from the shard, defined by
+ * the linear sharding function.
+ */
 class KvasGrpcServerNode(selfAddress: String, private val masterAddress: String) : KvasGrpcServer(selfAddress) {
   private val syncStub = masterAddress.toHostPort().let {
     kvas(it.first, it.second)
@@ -169,6 +188,7 @@ class KvasGrpcServerNode(selfAddress: String, private val masterAddress: String)
 
   private fun registerItself() {
     val log = LoggerFactory.getLogger("Node.RegisterItself")
+    // Send a registerShard request, adding the assigned token if it is available.
     val response = syncStub.registerShard(registerShardRequest {
       this@KvasGrpcServerNode.token?.let {
         this.shardToken = Int32Value.of(it)
@@ -188,11 +208,14 @@ class KvasGrpcServerNode(selfAddress: String, private val masterAddress: String)
     }
   }
 
+  /**
+   */
   protected fun completeRegistration(response: KvasProto.RegisterShardResponse) {
     if (this.token == null) {
       this.token = response.shardToken
 
-      response.shardsList.find { it.shardToken == getDataSourceShard() }?.let {
+      // If we have no token, we need to copy data from the shard where it is located now.
+      response.shardsList.find { it.shardToken == getSplitShardNumber() }?.let {
         moveData(it.nodeAddress, response.shardsList)
       }
     } else {
@@ -200,10 +223,9 @@ class KvasGrpcServerNode(selfAddress: String, private val masterAddress: String)
     }
   }
 
-  private fun getDataSourceShard() = this.token!!.clearHighestBit()
   private fun moveData(nodeAddress: String, shards: List<ShardInfo>) {
     val log = LoggerFactory.getLogger("Node.RegisterItself")
-    log.debug("Will try to copy data from node={}, with token={}", nodeAddress, getDataSourceShard())
+    log.debug("Will try to copy data from node={}, with token={}", nodeAddress, getSplitShardNumber())
     nodeAddress.toHostPort().let { hostPort ->
       kvas(hostPort.first, hostPort.second).moveData(moveDataRequest {
         this.destinationShardToken = this@KvasGrpcServerNode.token!!
@@ -216,4 +238,8 @@ class KvasGrpcServerNode(selfAddress: String, private val masterAddress: String)
 
   override suspend fun getShards(request: KvasProto.GetShardsRequest) = throw IllegalStateException("I am not a master")
 
+  /**
+   * Returns the shard number where this shard shall copy data from, using linear hashing method.
+   */
+  private fun getSplitShardNumber() = LinearHashing.splitShardNumber(this.token!!)
 }

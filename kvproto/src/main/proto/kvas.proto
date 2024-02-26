@@ -65,6 +65,7 @@ message KvasPutResponse {
 // For a simple "hash value modulo the number of nodes" it is a remainder of the hash value
 // divided by the number of shards.
 // For consistent hashing, it is the upper bound of the ring segment served by this node.
+// For linear hashing, it is the shard number as calculated by LinearHashing::shardNumber function.
 message ShardInfo {
     string node_address = 1;
     int32 shard_token = 2;

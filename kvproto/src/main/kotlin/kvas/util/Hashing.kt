@@ -22,5 +22,7 @@ object LinearHashing {
       lastBits.clearHighestBit()
     }
   }
+
+  fun splitShardNumber(shardNumber: Int) = shardNumber.clearHighestBit()
 }
 
