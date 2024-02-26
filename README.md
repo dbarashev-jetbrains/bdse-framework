@@ -67,3 +67,31 @@ gradle :kvnode:run --args='--grpc-port 9000 --db-port 5430'
 # worker kvnode
 gradle :kvnode:run --args='--grpc-port 9001 --db-port 5431 --master 127.0.0.1:9000'
 ```
+
+### Running local load test
+You can run a load test that sends a load of PUT and GET request to any KVAS cluster which is accessible by IP address.
+The command looks like:
+
+```shell
+# gradle :kvloadtest:run --args='sharding --help'
+> Task :kvloadtest:run
+Usage: main sharding [<options>]
+
+  sharding
+
+Options:
+  --http-port=<int>                    (default: 0)
+  --kvas-address=<text>                (default: 127.0.0.1:9000)
+  --key-count=<int>                    (default: 10)
+  --connection-count=<int>             (default: 1)
+  --method=(linear|simple|consistent)  (default: linear)
+  -h, --help                           Show this message and exit
+```
+
+The load test client is aware of three sharding methods. You can find their implementations in `KvasLoadTestBackend.kt` file.
+If the value of `--http-port` argument is other than 0, the load test starts an HTTP server on the specified port and ignores
+the remaining arguments. It waits for HTTP requests to its `/` path with the load test parameters specified in the query arguments: 
+
+```shell
+curl localhost:8080?master=127.0.0.1:9000&connections=4&keys=10000&method=linear
+```
