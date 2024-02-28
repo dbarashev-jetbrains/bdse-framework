@@ -144,7 +144,7 @@ message ReplicaGetGroupResponse {
     // The list of HOST[:PORT] addresses of the replica group instances.
     // HOST is either an IP address or a node name; optional PORT number follows
     // the HOST part and is separated with a colon.
-    repeated string replica_addresses = 1;
+    repeated ShardInfo replicas = 1;
 }
 
 // GRPC server interface.

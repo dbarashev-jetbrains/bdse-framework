@@ -10,13 +10,13 @@ import kotlin.system.exitProcess
  * Implementation of the load test backend that talks to KVAS servers.
  */
 class KvasLoadTestBackend(
-  private val connectionNum: Int,
-  private val shardNumber: (String)->Int,
+  private val shardNumberPut: (String)->Int,
+  private val shardNumberGet: (String)->Int = shardNumberPut,
   private val shardStubFactory: (Int)->KvasGrpc.KvasBlockingStub?) : Backend {
 
   private val shard2stub = mutableMapOf<Int, KvasGrpc.KvasBlockingStub>()
   override fun put(key: String, value: String) {
-    val shardNumber = shardNumber(key)
+    val shardNumber = shardNumberPut(key)
     val stub = shard2stub.getOrPut(shardNumber) {
       shardStubFactory(shardNumber) ?: error("Can't create stub for the shard $shardNumber")
     }
@@ -33,7 +33,7 @@ class KvasLoadTestBackend(
   }
 
   override fun get(key: String): String? {
-    val shardNumber = shardNumber(key)
+    val shardNumber = shardNumberGet(key)
     val stub = shard2stub.getOrPut(shardNumber) {
       shardStubFactory(shardNumber) ?: error("Can't create stub for the shard $shardNumber")
     }
@@ -71,7 +71,7 @@ abstract class ShardRouter(masterAddress: String) {
 
   fun getStub(shardToken: Int) = shardToken2stub[shardToken]
 
-  protected fun newStub(address: String) = address.toHostPort().let {
+  protected open fun newStub(address: String) = address.toHostPort().let {
     KvasGrpc.newBlockingStub(ManagedChannelBuilder.forAddress(it.first, it.second).usePlaintext().build())
   }
 
