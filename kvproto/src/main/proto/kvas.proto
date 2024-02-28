@@ -108,6 +108,45 @@ message MoveDataRequest {
     repeated ShardInfo shards = 2;
 }
 
+// A new replica which joins a replication group sends this request to the current
+// leader node.
+message ReplicaJoinGroupRequest {
+    // IP[:port] address of the replica node.
+    string replica_address = 1;
+}
+
+message ReplicaJoinGroupResponse {
+    // Empty response
+}
+
+// A log entry is a key-value pair with the ordinal number that is used for ordering the events.
+message LogEntry {
+    KeyValue kv = 1;
+    int32 ordinal_number = 2;
+}
+
+// The leader replica sends these requests to the followers when key-values are updated.
+// Key-value pairs in "entries" field must be in the order of their committing on the leader.
+// The follower replica must write the log entries into its own log and reply when the write is
+// committed. After that the follower can apply the log to its own storage.
+message ReplicaAppendLogRequest {
+    repeated LogEntry entries = 1;
+}
+
+message ReplicaAppendLogResponse {}
+
+// The client may request addresses of the replica group instances from the leader to balance the
+// load across all replicas.
+message ReplicaGetGroupRequest {
+}
+
+message ReplicaGetGroupResponse {
+    // The list of HOST[:PORT] addresses of the replica group instances.
+    // HOST is either an IP address or a node name; optional PORT number follows
+    // the HOST part and is separated with a colon.
+    repeated string replica_addresses = 1;
+}
+
 // GRPC server interface.
 service Kvas {
     rpc GetValue(KvasGetRequest) returns (KvasGetResponse) {}
@@ -117,4 +156,8 @@ service Kvas {
     rpc GetShards(GetShardsRequest) returns (GetShardsResponse) {}
 
     rpc MoveData(MoveDataRequest) returns (stream KeyValue){}
+
+    rpc ReplicaJoinGroup(ReplicaJoinGroupRequest) returns (ReplicaJoinGroupResponse) {}
+    rpc ReplicaAppendLog(ReplicaAppendLogRequest) returns (ReplicaAppendLogResponse) {}
+    rpc ReplicaGetGroup(ReplicaGetGroupRequest) returns (ReplicaGetGroupResponse) {}
 }
