@@ -21,14 +21,20 @@ class KvasLoadTestBackend(
       shardStubFactory(shardNumber) ?: error("Can't create stub for the shard $shardNumber")
     }
 
-    val response = stub.putValue(kvasPutRequest {
-      this.key = key
-      this.value = value
-      this.shardToken = shardNumber
-    })
-    if (response.code != KvasProto.KvasPutResponse.StatusCode.OK) {
-      error("Response code for key $key is not OK: $response. Shard token=$shardNumber")
-      exitProcess(1)
+    try {
+      val response = stub.putValue(kvasPutRequest {
+        this.key = key
+        this.value = value
+        this.shardToken = shardNumber
+      })
+      if (response.code != KvasProto.KvasPutResponse.StatusCode.OK) {
+        error("Response code for key $key is not OK: $response. Shard token=$shardNumber")
+        exitProcess(1)
+      }
+    } catch (ex: Exception) {
+      println("Failed to PUT key=$key")
+      ex.printStackTrace()
+      throw RuntimeException(ex)
     }
   }
 

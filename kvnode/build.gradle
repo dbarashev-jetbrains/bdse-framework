@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.jetbrains.kotlin.jvm' apply true
     id 'application'
+    id 'com.google.cloud.tools.jib' version "3.4.0"
 }
 
 version '2024.02.07'
@@ -23,7 +24,7 @@ dependencies {
     implementation 'org.postgresql:postgresql:42.6.0'
     implementation "com.github.ajalt.clikt:clikt:4.1.0"
 
-    implementation "ch.qos.logback:logback-classic:1.4.6"
+    implementation "ch.qos.logback:logback-classic:1.4.8"
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.+'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
 }
@@ -35,4 +36,19 @@ test {
 mainClassName = 'kvas.node.MainKt'
 compileKotlin {
     kotlinOptions.jvmTarget = "17"
+}
+
+jib {
+    to {
+        image = "ghcr.io/bdse-class-2024/kvnode:${System.env.BRANCH_NAME}"
+        auth {
+            username = 'USERNAME'
+            password = "${System.env.CR_PAT}"
+        }
+    }
+
+    container {
+        creationTime = "USE_CURRENT_TIMESTAMP"
+        mainClass = project.mainClassName
+    }
 }

@@ -14,12 +14,15 @@
         <appender-ref ref="async" />
     </root>
 
-    <logger name="Node" level="DEBUG" />
-    <logger name="Node.GetValue" level="DEBUG" />
-    <logger name="Node.PutValue" level="DEBUG" />
-    <logger name="Node.MoveData" level="DEBUG" />
+    <logger name="Node" level="INFO" />
+    <logger name="Node.GetValue" level="INFO" />
+    <logger name="Node.PutValue" level="INFO" />
+    <logger name="Node.MoveData" level="INFO" />
     <logger name="Master.RegisterItself" level="INFO" />
     <logger name="Master.RegisterShard" level="INFO" />
+    <logger name="Primary.RegisterReplica" level="DEBUG" />
+    <logger name="Primary.AppendLog" level="DEBUG" />
+    <logger name="Follower.AppendLog" level="DEBUG" />
     <logger name="com.zaxxer.hikari" level="INFO"/>
     <logger name="io.grpc.netty.NettyServerHandler" level="INFO"/>
 </configuration>

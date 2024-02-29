@@ -113,15 +113,20 @@ message MoveDataRequest {
 message ReplicaJoinGroupRequest {
     // IP[:port] address of the replica node.
     string replica_address = 1;
+    // The last entry that was committed on this replica. Leave empty if there are no data on this replica.
+    // The leader will send AppendLog requests starting from the entry that follows the last committed.
+    LogEntry last_committed_entry = 2;
 }
 
 message ReplicaJoinGroupResponse {
-    // Empty response
+    int32 replica_token = 1;
 }
 
 // A log entry is a key-value pair with the ordinal number that is used for ordering the events.
 message LogEntry {
+    // The key and the value
     KeyValue kv = 1;
+    // Ordinal number of this log entry.
     int32 ordinal_number = 2;
 }
 
@@ -133,7 +138,9 @@ message ReplicaAppendLogRequest {
     repeated LogEntry entries = 1;
 }
 
-message ReplicaAppendLogResponse {}
+message ReplicaAppendLogResponse {
+    LogEntry last_committed_entry = 1;
+}
 
 // The client may request addresses of the replica group instances from the leader to balance the
 // load across all replicas.

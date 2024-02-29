@@ -1,8 +1,11 @@
 package kvas.node
 
+import KvasReplicationFollower
+import KvasReplicationLeader
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.optionalValue
 import com.github.ajalt.clikt.parameters.types.int
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -23,7 +26,7 @@ class Main : CliktCommand() {
   val grpcPort: Int by option(help = "Kvas GRPC port number").int().default(9000)
   val master: String by option(help = "Master address in IP:PORT format").default("")
   val selfAddress_: String by option(help = "This node address in IP:PORT format", names = arrayOf("--self-address")).default("")
-  val primary_: String? by option("--primary", help = "IP[:PORT] address of the leader host in a replica group").default("")
+  val primary_: String? by option("--primary", help = "IP[:PORT] address of the leader host in a replica group").optionalValue("me")
 
   override fun run() {
     val selfAddress = if (selfAddress_ == "") {
@@ -50,9 +53,22 @@ class Main : CliktCommand() {
       }
     }
     if (master.isNotBlank()) {
-      ServerBuilder.forPort(grpcPort).addService(KvasGrpcServerNode(selfAddress, master)).build().start().also {
+      ServerBuilder.forPort(grpcPort).addService(KvasGrpcServerNode(selfAddress, master!!)).build().start().also {
         println("KVAS node started with self-address $selfAddress and master address $master. Hit Ctrl+C to stop")
         it.awaitTermination()
+      }
+    } else if (primary_?.isNotBlank() == true) {
+      if (primary_ == "me") {
+        ServerBuilder.forPort(grpcPort).addService(KvasReplicationLeader(selfAddress)).build().start().also {
+          println("KVAS PRIMARY node started with self-address $selfAddress. Hit Ctrl+C to stop")
+          it.awaitTermination()
+        }
+      } else {
+        ServerBuilder.forPort(grpcPort).addService(KvasReplicationFollower(selfAddress, primary_!!)).build().start()
+          .also {
+            println("KVAS node started as a FOLLOWER with self-address $selfAddress and PRIMARY address $primary_. Hit Ctrl+C to stop")
+            it.awaitTermination()
+          }
       }
     } else {
       ServerBuilder.forPort(grpcPort).addService(KvasGrpcServerMaster(selfAddress)).build().start().also {
