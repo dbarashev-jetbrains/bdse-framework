@@ -37,6 +37,7 @@ open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCo
   // This shard token
   protected var token: Int? = null
 
+  protected val keyCount get() = key2value.size
   /**
    * getValue returns success if the token supplier in the request matches this node token, that means that
    * the client has up-to-date information about the shard distribution.
@@ -44,17 +45,15 @@ open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCo
    * Please refer to ShardInfo protocol buffer docs in kvas.proto file for the meaning of shard_token value.
    */
   override suspend fun getValue(request: KvasGetRequest): KvasGetResponse =
-    token?.let {
+    if (validateToken(request.shardToken)) {
       // If the token is assigned and it matches the token in the request, we serve it.
-      if (it == request.shardToken) {
-        kvasGetResponse {
-          code = KvasGetResponse.StatusCode.OK
-          key2value[request.key]?.let {
-            this.value = StringValue.of(it)
-          }
+      kvasGetResponse {
+        code = KvasGetResponse.StatusCode.OK
+        key2value[request.key]?.let {
+          this.value = StringValue.of(it)
         }
-      } else null
-    } ?: run {
+      }
+    } else {
       kvasGetResponse { code = KvasGetResponse.StatusCode.REFRESH_SHARDS }
     }
 
@@ -67,21 +66,25 @@ open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCo
   override suspend fun putValue(request: KvasProto.KvasPutRequest): KvasProto.KvasPutResponse {
     val log = LoggerFactory.getLogger("Node.PutValue")
     log.debug("token={}, request=[{}]", token, request)
-    val response = token?.let {
-      // If the token is assigned and it matches the token in the request, we serve it.
-      if (it == request.shardToken) {
+    val response =
+      if (validateToken(request.shardToken)) {
+        // If the token is assigned and it matches the token in the request, we serve it.
         key2value[request.key] = request.value
         kvasPutResponse {
           code = KvasProto.KvasPutResponse.StatusCode.OK
         }
-      } else null
-    } ?: run {
-      kvasPutResponse { code = KvasProto.KvasPutResponse.StatusCode.REFRESH_SHARDS }
-    }
+      } else {
+        kvasPutResponse { code = KvasProto.KvasPutResponse.StatusCode.REFRESH_SHARDS }
+      }
     return response
   }
+
   protected fun putValue(entry: KeyValue) {
     key2value[entry.key] = entry.value
+  }
+
+  protected open fun validateToken(requestToken: Int): Boolean {
+    return this.token?.let { it == requestToken } ?: false
   }
 
   /**
@@ -109,7 +112,6 @@ open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCo
 class KvasGrpcServerMaster(selfAddress: String) : KvasGrpcServer(selfAddress) {
   // Shard mapping, maps shard tokens to node addresses.
   private val token2node = mutableMapOf<Int, String>()
-
   init {
     // Master token is 0.
     token = 0

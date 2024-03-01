@@ -13,12 +13,14 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.measureTime
 
 interface Backend {
+  val stats: String
+
   fun put(key: String, value: String)
   fun get(key: String): String?
 }
 
 typealias KV = Pair<String, String>
-private data class KvasNodeJob(val receivingChannel: Channel<KV>, val job: Job)
+private data class KvasNodeJob(val receivingChannel: Channel<KV>, val job: Job, val backend: Backend)
 
 private fun createPutJob(
   partitionNumber: Int, backend: Backend, scope: CoroutineScope
@@ -27,7 +29,7 @@ private fun createPutJob(
   val job = scope.launch {
     sendPutRequests(channel, partitionNumber, backend)
   }
-  return KvasNodeJob(channel, job)
+  return KvasNodeJob(channel, job, backend)
 }
 
 @OptIn(ExperimentalTime::class)
@@ -38,7 +40,7 @@ private fun createGetJob(
   val job = scope.launch {
     sendGetRequests(channel, partitionNumber, backend)
   }
-  return KvasNodeJob(channel, job)
+  return KvasNodeJob(channel, job, backend)
 }
 
 private suspend fun sendPutRequests(channel: Channel<KV>, jobNumber: Int, backend: Backend) {
@@ -95,42 +97,71 @@ private suspend fun generateLoad(channels: Map<Int, Channel<KV>>, keyCount: Int,
   }
 }
 
+enum class Workload {
+  MIXED, READONLY
+}
 typealias BackendFactory = (Int)->Backend
 @ExperimentalTime
-suspend fun runTest(keyCount: Int, channelCount: Int, backendFactory: BackendFactory): String {
+suspend fun runTest(workload: Workload, keyCount: Int, channelCount: Int, backendFactory: BackendFactory): String {
   val report = mutableListOf<String>()
   val scope = CoroutineScope( Executors.newFixedThreadPool(channelCount).asCoroutineDispatcher())
-  println("Generating PUT requests")
-  val loaders = (1..channelCount).map {
-    createPutJob(it, backendFactory(it), scope)
-  }
-  val putChannels = loaders.mapIndexed { index, job ->  index to job.receivingChannel }.toMap()
-  val putTime = measureTime {
-    generateLoad(putChannels, keyCount)
-    loaders.map { it.job }.forEach { it.join() }
-  }
-  report.add("Processed $keyCount PUT requests in $putTime (${keyCount/putTime.inSeconds()} RPS)")
 
-  val updaters = (1..channelCount).map {
-    createPutJob(it, backendFactory(it), scope)
+  suspend fun generatePutWorkload() {
+    println("Generating PUT requests")
+    val loaders = (1..channelCount).map {
+      createPutJob(it, backendFactory(it), scope)
+    }
+    val putChannels = loaders.mapIndexed { index, job -> index to job.receivingChannel }.toMap()
+    val putTime = measureTime {
+      generateLoad(putChannels, keyCount)
+      loaders.map { it.job }.forEach { it.join() }
+    }
+    report.add("Processed $keyCount PUT requests in $putTime (${keyCount / putTime.inSeconds()} RPS)")
+    report.add("Backend stats:")
+    report.addAll(loaders.map { it.backend.stats }.toList())
   }
-  val updateChannels = updaters.mapIndexed { index, job ->  index to job.receivingChannel }.toMap()
-  val updateTime = measureTime {
-    generateLoad(updateChannels, keyCount) { Random.nextInt(keyCount/2) }
-    updaters.map { it.job }.forEach { it.join() }
-  }
-  report.add("Processed $keyCount UPDATE requests in $updateTime (${keyCount/putTime.inSeconds()} RPS)")
 
-  println("Generating GET requests")
-  val readers = (1..channelCount).map {
-    createGetJob(it, backendFactory(it), scope)
+  suspend fun generateUpdateWorkload() {
+    val updaters = (1..channelCount).map {
+      createPutJob(it, backendFactory(it), scope)
+    }
+    val updateChannels = updaters.mapIndexed { index, job -> index to job.receivingChannel }.toMap()
+    val updateTime = measureTime {
+      generateLoad(updateChannels, keyCount) { Random.nextInt(keyCount / 2) }
+      updaters.map { it.job }.forEach { it.join() }
+    }
+    report.add("Processed $keyCount UPDATE requests in $updateTime (${keyCount / updateTime.inSeconds()} RPS)")
+    report.add("Backend stats:")
+    report.addAll(updaters.map { it.backend.stats }.toList())
   }
-  val readChannels = readers.mapIndexed { index, job ->  index to job.receivingChannel }.toMap()
-  val getTime = measureTime {
-    generateLoad(readChannels, keyCount)
-    readers.map { it.job }.forEach { it.join() }
+
+  suspend fun generateGetWorkload() {
+    println("Generating GET requests")
+    val readers = (1..channelCount).map {
+      createGetJob(it, backendFactory(it), scope)
+    }
+    val readChannels = readers.mapIndexed { index, job ->  index to job.receivingChannel }.toMap()
+    val getTime = measureTime {
+      generateLoad(readChannels, keyCount)
+      readers.map { it.job }.forEach { it.join() }
+    }
+    report.add("Processed $keyCount GET requests in $getTime (${keyCount/getTime.inSeconds()} RPS)")
+    report.add("Backend stats:")
+    report.addAll(readers.map { it.backend.stats }.toList())
+
   }
-  report.add("Processed $keyCount GET requests in $getTime (${keyCount/getTime.inSeconds()} RPS)")
+
+  when (workload) {
+    Workload.MIXED -> {
+      generatePutWorkload()
+      generateUpdateWorkload()
+      generateGetWorkload()
+    }
+    Workload.READONLY -> {
+      generateGetWorkload()
+    }
+  }
+
   return report.joinToString(separator = "\n")
 }
 

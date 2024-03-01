@@ -10,33 +10,45 @@ import kotlin.system.exitProcess
  * Implementation of the load test backend that talks to KVAS servers.
  */
 class KvasLoadTestBackend(
-  private val connectionNum: Int,
-  private val shardNumber: (String)->Int,
+  private val shardNumberPut: (String)->Int,
+  private val shardNumberGet: (String)->Int = shardNumberPut,
   private val shardStubFactory: (Int)->KvasGrpc.KvasBlockingStub?) : Backend {
 
   private val shard2stub = mutableMapOf<Int, KvasGrpc.KvasBlockingStub>()
+  private val shard2requestCount = mutableMapOf<Int, Int>()
+  override val stats: String get() {
+    return shard2requestCount.map { entry -> "Sent ${entry.value} requests to shard#${entry.key}" }.joinToString(separator = ", ")
+  }
   override fun put(key: String, value: String) {
-    val shardNumber = shardNumber(key)
+    val shardNumber = shardNumberPut(key)
     val stub = shard2stub.getOrPut(shardNumber) {
       shardStubFactory(shardNumber) ?: error("Can't create stub for the shard $shardNumber")
     }
 
-    val response = stub.putValue(kvasPutRequest {
-      this.key = key
-      this.value = value
-      this.shardToken = shardNumber
-    })
-    if (response.code != KvasProto.KvasPutResponse.StatusCode.OK) {
-      error("Response code for key $key is not OK: $response. Shard token=$shardNumber")
-      exitProcess(1)
+    try {
+      shard2requestCount.increment(shardNumber)
+      val response = stub.putValue(kvasPutRequest {
+        this.key = key
+        this.value = value
+        this.shardToken = shardNumber
+      })
+      if (response.code != KvasProto.KvasPutResponse.StatusCode.OK) {
+        error("Response code for key $key is not OK: $response. Shard token=$shardNumber")
+        exitProcess(1)
+      }
+    } catch (ex: Exception) {
+      println("Failed to PUT key=$key")
+      ex.printStackTrace()
+      throw RuntimeException(ex)
     }
   }
 
   override fun get(key: String): String? {
-    val shardNumber = shardNumber(key)
+    val shardNumber = shardNumberGet(key)
     val stub = shard2stub.getOrPut(shardNumber) {
       shardStubFactory(shardNumber) ?: error("Can't create stub for the shard $shardNumber")
     }
+    shard2requestCount.increment(shardNumber)
     return stub.getValue(kvasGetRequest {
       this.key = key
       this.shardToken = shardNumber
@@ -71,7 +83,7 @@ abstract class ShardRouter(masterAddress: String) {
 
   fun getStub(shardToken: Int) = shardToken2stub[shardToken]
 
-  protected fun newStub(address: String) = address.toHostPort().let {
+  private fun newStub(address: String) = address.toHostPort().let {
     KvasGrpc.newBlockingStub(ManagedChannelBuilder.forAddress(it.first, it.second).usePlaintext().build())
   }
 
@@ -108,3 +120,6 @@ class ConsistentHashingRouter(masterAddress: String) : ShardRouter(masterAddress
   }
 }
 
+fun <T> MutableMap<T, Int>.increment(key: T) {
+  this[key] = this.getOrDefault(key, 0) + 1
+}

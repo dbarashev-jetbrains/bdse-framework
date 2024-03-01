@@ -31,6 +31,9 @@ message KvasGetResponse {
 
     // Status code. The client must check the status code and do what the status code instructs.
     StatusCode code = 2;
+
+    // Value version number for the protocols that use it.
+    int32 version = 3;
 }
 
 // Request to put a value by the specified key. The client must supply the request with
@@ -57,6 +60,9 @@ message KvasPutResponse {
     }
     // Status code. The client must check the status code and do what the status code instructs.
     StatusCode code = 1;
+
+    // Value version number for the protocols that use it.
+    int32 version = 2;
 }
 
 // Shard information includes a node IP:port address and an integer token.
@@ -108,6 +114,59 @@ message MoveDataRequest {
     repeated ShardInfo shards = 2;
 }
 
+// A new replica which joins a replication group sends this request to the current
+// leader node.
+message ReplicaJoinGroupRequest {
+    // IP[:port] address of the replica node.
+    string replica_address = 1;
+    // The last entry that was committed on this replica. Leave empty if there are no data on this replica.
+    // The leader will send AppendLog requests starting from the entry that follows the last committed.
+    LogEntry last_committed_entry = 2;
+}
+
+// If replica is registered successfully, it receives its replica number.
+message ReplicaJoinGroupResponse {
+    int32 replica_token = 1;
+}
+
+// A log entry is a key-value pair with the ordinal number that is used for ordering the events.
+message LogEntry {
+    // The key and the value
+    KeyValue kv = 1;
+    // Ordinal number of this log entry.
+    int32 ordinal_number = 2;
+    // Flag indicating if this entry is committed
+    bool is_committed = 3;
+}
+
+// The leader replica sends these requests to the followers when key-values are updated.
+// Key-value pairs in "entries" field must be in the order of their committing on the leader.
+// The follower replica must write the log entries into its own log and reply when the write is
+// committed. After that the follower can apply the log to its own storage.
+message ReplicaAppendLogRequest {
+    repeated LogEntry entries = 1;
+}
+
+message ReplicaAppendLogResponse {
+    LogEntry last_committed_entry = 1;
+}
+
+// The client may request addresses of the replica group instances from the leader to balance the
+// load across all replicas.
+message ReplicaGetGroupRequest {
+}
+
+message ReplicaGetGroupResponse {
+    // The list of HOST[:PORT] addresses of the replica group instances.
+    // HOST is either an IP address or a node name; optional PORT number follows
+    // the HOST part and is separated with a colon.
+    //
+    // We use ShardInfo proto from the sharding section just because it is already available. It carries no sharding
+    // semantics in the context of replication.
+    // By convention, the shard-token of the leader node must be 0.
+    repeated ShardInfo replicas = 1;
+}
+
 // GRPC server interface.
 service Kvas {
     rpc GetValue(KvasGetRequest) returns (KvasGetResponse) {}
@@ -117,4 +176,8 @@ service Kvas {
     rpc GetShards(GetShardsRequest) returns (GetShardsResponse) {}
 
     rpc MoveData(MoveDataRequest) returns (stream KeyValue){}
+
+    rpc ReplicaJoinGroup(ReplicaJoinGroupRequest) returns (ReplicaJoinGroupResponse) {}
+    rpc ReplicaAppendLog(ReplicaAppendLogRequest) returns (ReplicaAppendLogResponse) {}
+    rpc ReplicaGetGroup(ReplicaGetGroupRequest) returns (ReplicaGetGroupResponse) {}
 }
