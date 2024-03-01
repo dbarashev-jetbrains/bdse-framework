@@ -31,6 +31,9 @@ message KvasGetResponse {
 
     // Status code. The client must check the status code and do what the status code instructs.
     StatusCode code = 2;
+
+    // Value version number for the protocols that use it.
+    int32 version = 3;
 }
 
 // Request to put a value by the specified key. The client must supply the request with
@@ -57,6 +60,9 @@ message KvasPutResponse {
     }
     // Status code. The client must check the status code and do what the status code instructs.
     StatusCode code = 1;
+
+    // Value version number for the protocols that use it.
+    int32 version = 2;
 }
 
 // Shard information includes a node IP:port address and an integer token.
@@ -118,6 +124,7 @@ message ReplicaJoinGroupRequest {
     LogEntry last_committed_entry = 2;
 }
 
+// If replica is registered successfully, it receives its replica number.
 message ReplicaJoinGroupResponse {
     int32 replica_token = 1;
 }
@@ -128,6 +135,8 @@ message LogEntry {
     KeyValue kv = 1;
     // Ordinal number of this log entry.
     int32 ordinal_number = 2;
+    // Flag indicating if this entry is committed
+    bool is_committed = 3;
 }
 
 // The leader replica sends these requests to the followers when key-values are updated.
@@ -151,6 +160,10 @@ message ReplicaGetGroupResponse {
     // The list of HOST[:PORT] addresses of the replica group instances.
     // HOST is either an IP address or a node name; optional PORT number follows
     // the HOST part and is separated with a colon.
+    //
+    // We use ShardInfo proto from the sharding section just because it is already available. It carries no sharding
+    // semantics in the context of replication.
+    // By convention, the shard-token of the leader node must be 0.
     repeated ShardInfo replicas = 1;
 }
 

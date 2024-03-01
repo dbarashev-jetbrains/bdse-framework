@@ -15,6 +15,10 @@ class KvasLoadTestBackend(
   private val shardStubFactory: (Int)->KvasGrpc.KvasBlockingStub?) : Backend {
 
   private val shard2stub = mutableMapOf<Int, KvasGrpc.KvasBlockingStub>()
+  private val shard2requestCount = mutableMapOf<Int, Int>()
+  override val stats: String get() {
+    return shard2requestCount.map { entry -> "Sent ${entry.value} requests to shard#${entry.key}" }.joinToString(separator = ", ")
+  }
   override fun put(key: String, value: String) {
     val shardNumber = shardNumberPut(key)
     val stub = shard2stub.getOrPut(shardNumber) {
@@ -22,6 +26,7 @@ class KvasLoadTestBackend(
     }
 
     try {
+      shard2requestCount.increment(shardNumber)
       val response = stub.putValue(kvasPutRequest {
         this.key = key
         this.value = value
@@ -43,6 +48,7 @@ class KvasLoadTestBackend(
     val stub = shard2stub.getOrPut(shardNumber) {
       shardStubFactory(shardNumber) ?: error("Can't create stub for the shard $shardNumber")
     }
+    shard2requestCount.increment(shardNumber)
     return stub.getValue(kvasGetRequest {
       this.key = key
       this.shardToken = shardNumber
@@ -77,7 +83,7 @@ abstract class ShardRouter(masterAddress: String) {
 
   fun getStub(shardToken: Int) = shardToken2stub[shardToken]
 
-  protected open fun newStub(address: String) = address.toHostPort().let {
+  private fun newStub(address: String) = address.toHostPort().let {
     KvasGrpc.newBlockingStub(ManagedChannelBuilder.forAddress(it.first, it.second).usePlaintext().build())
   }
 
@@ -114,3 +120,6 @@ class ConsistentHashingRouter(masterAddress: String) : ShardRouter(masterAddress
   }
 }
 
+fun <T> MutableMap<T, Int>.increment(key: T) {
+  this[key] = this.getOrDefault(key, 0) + 1
+}
