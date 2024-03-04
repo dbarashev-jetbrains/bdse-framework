@@ -17,8 +17,8 @@ class ReplicaRouter(primaryAddress: String) {
     }
   }
 
-  fun replicaNumberPut(key: String) = 0
-  fun replicaNumberGet(key: String) = Random.nextInt(replica2stub.size)
+  fun replicaLeaderNumber(key: String) = 0
+  fun replicaRandomNumber(key: String) = Random.nextInt(replica2stub.size)
   fun getStub(shardToken: Int): KvasGrpc.KvasBlockingStub? = replica2stub[shardToken]
 
   fun newStub(address: String) = address.toHostPort().let {

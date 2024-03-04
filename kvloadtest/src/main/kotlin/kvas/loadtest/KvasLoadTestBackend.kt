@@ -37,7 +37,7 @@ class KvasLoadTestBackend(
         exitProcess(1)
       }
     } catch (ex: Exception) {
-      println("Failed to PUT key=$key")
+      println("Failed to PUT key=$key into a shard=$shardNumber")
       ex.printStackTrace()
       throw RuntimeException(ex)
     }
@@ -68,7 +68,7 @@ class KvasLoadTestBackend(
 abstract class ShardRouter(masterAddress: String) {
   private val shardToken2stub = mutableMapOf<Int, KvasGrpc.KvasBlockingStub>()
 
-  protected val shardTokens: List<Int> = shardToken2stub.keys.sorted()
+  protected val shardTokens: List<Int> get() = shardToken2stub.keys.sorted()
   protected val shardCount get() = shardToken2stub.size
   init {
     newStub(masterAddress).getShards(getShardsRequest {  }).also {

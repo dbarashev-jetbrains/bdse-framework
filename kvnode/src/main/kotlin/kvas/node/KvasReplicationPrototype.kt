@@ -1,9 +1,6 @@
 package kvas.node
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import kvas.proto.*
 import kvas.proto.KvasProto.*
 import kvas.util.kvas
@@ -43,9 +40,9 @@ class KvasReplicationLeader(selfAddress: String) : KvasGrpcServer(selfAddress) {
   override suspend fun replicaJoinGroup(request: KvasProto.ReplicaJoinGroupRequest): KvasProto.ReplicaJoinGroupResponse {
     synchronized(replica2logSender) {
       val replicaToken = replica2logSender.size + 1
-      val logSender = LogSender(logEntries, request.replicaAddress, replicaToken,
+      val logSender = RealLogSender(logEntries, request.replicaAddress, replicaToken,
         if (request.hasLastCommittedEntry()) request.lastCommittedEntry.ordinalNumber else -1,
-        onReplicaFail = this::removeReplica
+        onReplicaFail = {}
       )
       replica2logSender[request.replicaAddress] = logSender
       return replicaJoinGroupResponse { this.replicaToken = replicaToken }.also {
@@ -87,12 +84,6 @@ class KvasReplicationLeader(selfAddress: String) : KvasGrpcServer(selfAddress) {
   private fun replicate() {
     replica2logSender.values.forEach { it.run() }
   }
-
-  private fun removeReplica(replicaAddress: String) {
-    synchronized(replica2logSender) {
-      replica2logSender.remove(replicaAddress)
-    }
-  }
 }
 
 /**
@@ -103,6 +94,8 @@ class KvasReplicationFollower(selfAddress: String, private val primaryAddress: S
   private var replica_token = -1
   private var getSuccessCounter = 0
   private val primaryStub = primaryAddress.toHostPort().let { kvas(it.first, it.second) }
+  private val outageEmulator = OutageEmulator<ReplicaAppendLogResponse>()
+
   init {
     val response = primaryStub.replicaJoinGroup(replicaJoinGroupRequest {
       this.replicaAddress = selfAddress
@@ -131,43 +124,54 @@ class KvasReplicationFollower(selfAddress: String, private val primaryAddress: S
    */
   override fun validateToken(requestToken: Int) = true
 
-  override suspend fun replicaAppendLog(request: KvasProto.ReplicaAppendLogRequest): KvasProto.ReplicaAppendLogResponse {
-    var lastCommittedEntry: LogEntry? = null
-    request.entriesList.forEach { entry ->
-      super.putValue(kvasPutRequest {
-        this.key = entry.kv.key
-        this.value = entry.kv.value
-        this.shardToken = replica_token
-      })
-      lastCommittedEntry = entry
-    }
-    LoggerFactory.getLogger("Follower.AppendLog").debug(
-      "Appended {} log records. Now we have {} keys and last committed is {}",
-      request.entriesList.size,
-      this.keyCount,
-      lastCommittedEntry
-    )
-    return lastCommittedEntry?.let {
-      replicaAppendLogResponse {
-        this.lastCommittedEntry = it
+  /**
+   * This call uses outage emulator that will cause some of the append log requests to "fail", which will make
+   * the replica falling behind the primary.
+   */
+  override suspend fun replicaAppendLog(request: KvasProto.ReplicaAppendLogRequest): KvasProto.ReplicaAppendLogResponse =
+    outageEmulator.serveIfAvailable {
+      var lastCommittedEntry: LogEntry? = null
+      request.entriesList.forEach { entry ->
+        runBlocking {
+          super.putValue(kvasPutRequest {
+            this.key = entry.kv.key
+            this.value = entry.kv.value
+            this.shardToken = replica_token
+          })
+          lastCommittedEntry = entry
+        }
       }
-    } ?: replicaAppendLogResponse {  }
-  }
+      LoggerFactory.getLogger("Follower.AppendLog").debug(
+        "Appended {} log records. Now we have {} keys and last committed is {}",
+        request.entriesList.size,
+        this.keyCount,
+        lastCommittedEntry
+      )
+      lastCommittedEntry?.let {
+        replicaAppendLogResponse {
+          this.lastCommittedEntry = it
+        }
+      } ?: replicaAppendLogResponse { }
+    }.getOrThrow()
+}
+
+abstract class LogSender(internal val replicaToken: Int) {
+  abstract fun run()
 }
 
 /**
  * This class keeps the state of the log replication for a single replica and sends out AppendLog requests.
  * Communication failures are reported to the server (and replica is removed from the list).
  */
-class LogSender(private val entries: Queue<LogEntry>,
-                private val replicaAddress: String,
-                internal val replicaToken: Int,
-                private var lastCommittedEntry: Int = -1,
-                private val onReplicaFail: (String)->Unit
-  ) {
+class RealLogSender(private val entries: Queue<LogEntry>,
+                    private val replicaAddress: String,
+                    replicaToken: Int,
+                    private var lastCommittedEntry: Int = -1,
+                    private val onReplicaFail: (String)->Unit
+  ) : LogSender(replicaToken) {
   private val stub = replicaAddress.toHostPort().let { kvas(it.first, it.second) }
   private val log = LoggerFactory.getLogger("Primary.AppendLog")
-  fun run() {
+  override fun run() {
     val entries = entries.dropWhile { it.ordinalNumber <= lastCommittedEntry }.sortedBy { it.ordinalNumber }
     if (entries.isEmpty()) {
       return
@@ -184,7 +188,7 @@ class LogSender(private val entries: Queue<LogEntry>,
       }
       lastCommittedEntry = response.lastCommittedEntry.ordinalNumber
     } catch (ex: Exception) {
-      log.error("Failed to send AppendLog request to {}", replicaAddress, ex)
+      log.error("Failed to send AppendLog request to {}. Entries are: [{}..{}]", replicaAddress, entries.first().kv, entries.last().kv)
       onReplicaFail(replicaAddress)
     }
   }
