@@ -6,6 +6,8 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlin.system.exitProcess
 import kotlin.time.Duration
@@ -48,8 +50,13 @@ private suspend fun sendPutRequests(channel: Channel<KV>, jobNumber: Int, backen
   var count = 0
   val time = measureTime {
     for ((key, value) in channel) {
-      backend.put(key, value)
-      count++
+      try {
+        backend.put(key, value)
+        count++
+      } catch (ex: Exception) {
+        ex.printStackTrace()
+        exitProcess(1)
+      }
     }
   }
   println("Finished PUT job #$jobNumber. Processed $count requests in $time (${count/time.inSeconds()} RPS)")
@@ -79,8 +86,37 @@ private suspend fun sendGetRequests(
   println("Finished GET job #$jobNumber. Processed $count requests in $time (${count/time.inSeconds()} RPS)")
 }
 
+private suspend fun sendPutGetRequests(channel: Channel<KV>, jobNum: Int, backend: Backend): Int {
+  println("Started MIXED job #$jobNum in ${Thread.currentThread()}")
+  var count = 0
+  var consistentReads = 0
+  val time = measureTime {
+    for ((key, value) in channel) {
+      try {
+        count++
+        val firstValue = "${value}_"
+        backend.put(key, firstValue)
+
+        val secondValue = value
+        backend.put(key, secondValue)
+        val readValue = backend.get(key)
+        if (readValue == secondValue) {
+          consistentReads++
+        } else {
+          println("Expected $secondValue got $readValue")
+        }
+      } catch (ex: Exception) {
+        ex.printStackTrace()
+        println("Failed to PUT key $key into backend $backend")
+      }
+    }
+  }
+  println("Finished MIXED job #$jobNum. Processed $count requests in $time (${count/time.inSeconds()} RPC)")
+  println("Reads were consistent $consistentReads times")
+  return consistentReads
+}
 private suspend fun generateLoad(channels: Map<Int, Channel<KV>>, keyCount: Int, keyProducer: (Int)->Int = {it}) {
-  for (idx in 0..keyCount) {
+  for (idx in 0 until keyCount) {
     val key = "${keyProducer(idx)}"
     val value = "val $key"
     val partitionNumber = key.hashCode() % channels.size
@@ -98,7 +134,7 @@ private suspend fun generateLoad(channels: Map<Int, Channel<KV>>, keyCount: Int,
 }
 
 enum class Workload {
-  MIXED, READONLY
+  MIXED, READONLY, SEQUENTIAL
 }
 typealias BackendFactory = (Int)->Backend
 @ExperimentalTime
@@ -151,13 +187,38 @@ suspend fun runTest(workload: Workload, keyCount: Int, channelCount: Int, backen
 
   }
 
+  suspend fun generatePutGetWorkload() {
+    println("Generating PUT and GET requests")
+    var consistentReads = AtomicInteger(0)
+    val jobs = (1..channelCount).map {
+      val backend = backendFactory(it)
+      val channel = Channel<KV>(Channel.UNLIMITED)
+      val job = scope.launch {
+        consistentReads.getAndAdd(sendPutGetRequests(channel, it, backend))
+      }
+      KvasNodeJob(channel, job, backend)
+    }
+    val channels = jobs.mapIndexed { idx, job -> idx to job.receivingChannel }.toMap()
+    val updateTime = measureTime {
+      generateLoad(channels, keyCount)
+      jobs.map { it.job }.forEach { it.join() }
+    }
+    report.add("Processed $keyCount write/read cycles in $updateTime (${keyCount/updateTime.inSeconds()}) RPS")
+    report.add("Reads were consistent ${consistentReads.get()} times (${(consistentReads.get()*100.0/keyCount).roundToInt()}%)")
+    report.add("Backend stats:")
+    report.addAll(jobs.map { it.backend.stats }.toList())
+  }
+
   when (workload) {
     Workload.MIXED -> {
-      generatePutWorkload()
-      generateUpdateWorkload()
-      generateGetWorkload()
+      generatePutGetWorkload()
     }
     Workload.READONLY -> {
+      generateGetWorkload()
+    }
+    Workload.SEQUENTIAL -> {
+      generatePutWorkload()
+      generateUpdateWorkload()
       generateGetWorkload()
     }
   }

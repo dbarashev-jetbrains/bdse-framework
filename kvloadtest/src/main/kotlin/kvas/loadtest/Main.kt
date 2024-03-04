@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.output.MordantHelpFormatter
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.enum
@@ -61,7 +62,7 @@ class Replication: CliktCommand("Runs the load test against the replicate databa
   val keyCount by option(help="How many keys shall be generated").int().default(10)
   val connectionCount by option(help="How many connections shall be used for every node").int().default(1)
   val workload by option(help="What type of the workload shall be generated").enum<Workload>().default(Workload.MIXED)
-
+  val leaderless by option(help="Is it a leader-based replication").flag()
   init {
     context {
       helpFormatter = { MordantHelpFormatter(it, showDefaultValues = true) }
@@ -75,7 +76,7 @@ class Replication: CliktCommand("Runs the load test against the replicate databa
       }.start(wait = true)
     } else {
       runBlocking {
-        val result = runReplicationLoadTest(kvasAddress, workload, connectionCount, keyCount)
+        val result = runReplicationLoadTest(kvasAddress, leaderless, workload, connectionCount, keyCount)
         println("""
           |------------------------------------------------------------
           |$result
@@ -100,7 +101,7 @@ fun Application.module() {
 fun Application.configureRouting() {
   routing {
     route("/") {
-      get("{master?}{connections?}{keys?}{method?}") {
+      get("{master?}{connections?}{keys?}{method?}{?leaderless}") {
         val masterIP = call.parameters["master"]
           ?: return@get call.respondText("Missing master IP", status = HttpStatusCode.BadRequest )
         val connectionCount = call.parameters["connections"]?.toInt()
@@ -141,13 +142,13 @@ suspend fun runShardingLoadTest(masterAddress: String, workload: Workload, conne
 }
 
 @OptIn(ExperimentalTime::class)
-suspend fun runReplicationLoadTest(masterAddress: String, workload: Workload, connectionCount: Int, keyCount: Int): String {
-  println("running load test with master=${masterAddress} connection count=${connectionCount} and key count=${keyCount}")
+suspend fun runReplicationLoadTest(masterAddress: String, leaderless: Boolean,  workload: Workload, connectionCount: Int, keyCount: Int): String {
+  println("running ${if (leaderless) "leaderless" else "leader-based"} load test with master=${masterAddress} connection count=${connectionCount} and key count=${keyCount}")
   val replicaRouter = ReplicaRouter(masterAddress)
   return runTest(workload, keyCount, connectionCount) {replicaNum ->
     KvasLoadTestBackend(
-      shardNumberPut = replicaRouter::replicaNumberPut,
-      shardNumberGet = replicaRouter::replicaNumberGet,
+      shardNumberPut = if (leaderless) replicaRouter::replicaRandomNumber else replicaRouter::replicaLeaderNumber,
+      shardNumberGet = replicaRouter::replicaRandomNumber,
       shardStubFactory = replicaRouter::getStub
     )
   }

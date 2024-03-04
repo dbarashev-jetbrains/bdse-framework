@@ -9,6 +9,7 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import com.zaxxer.hikari.pool.HikariPool.PoolInitializationException
 import io.grpc.ServerBuilder
+import org.postgresql.util.PSQLException
 
 /**
  * Точка входа для квасного сервера. Разбирает аргументы командной строки, устанавливает соединение с постгресом,
@@ -47,6 +48,8 @@ class Main : CliktCommand() {
           }
         }
       } catch (ex: PoolInitializationException) {
+        println("Postgres connection failed")
+      } catch (ex: PSQLException) {
         println("Postgres connection failed")
       }
     }
