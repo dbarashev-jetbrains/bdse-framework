@@ -47,6 +47,9 @@ message KvasPutRequest {
 
     // Shard token from the metadata known to the client.
     int32 shard_token = 3;
+
+    // Value version that is known to the client.
+    google.protobuf.Int32Value version = 4;
 }
 
 // Response to PutValue request
