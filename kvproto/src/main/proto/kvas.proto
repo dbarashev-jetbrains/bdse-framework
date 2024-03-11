@@ -14,6 +14,8 @@ message KeyValue {
 message KvasGetRequest {
     string key = 1;
     int32 shard_token = 2;
+    // IP:PORT address of the client who issued the request, to make it possible to handle it depending on the client.
+    string client_address = 3;
 }
 
 // Response to GetValue request.
@@ -50,6 +52,9 @@ message KvasPutRequest {
 
     // Value version that is known to the client.
     google.protobuf.Int32Value version = 4;
+
+    // IP:PORT address of the client who issued the request, to make it possible to handle it depending on the client.
+    string client_address = 5;
 }
 
 // Response to PutValue request
