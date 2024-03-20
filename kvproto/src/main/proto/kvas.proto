@@ -137,26 +137,71 @@ message ReplicaJoinGroupResponse {
     int32 replica_token = 1;
 }
 
+// The log entry number, consisting of the term number when this entry was appended to the leader's log and
+// the ordinal number of this entry in the leader's log.
+message LogEntryNumber {
+    int64 ordinal_number = 1;
+    int64 term_number = 2;
+}
+
 // A log entry is a key-value pair with the ordinal number that is used for ordering the events.
 message LogEntry {
     // The key and the value
     KeyValue kv = 1;
     // Ordinal number of this log entry.
+    // DEPRECATED, in favor of entry_number field below.
     int32 ordinal_number = 2;
     // Flag indicating if this entry is committed
     bool is_committed = 3;
+
+    // The number of this entry in the leader/follower log. REPLACES ordinal_number field above.
+    LogEntryNumber entry_number = 4;
 }
 
 // The leader replica sends these requests to the followers when key-values are updated.
-// Key-value pairs in "entries" field must be in the order of their committing on the leader.
+// Key-value pairs in the "entries" field must be in the order of their committing on the leader.
 // The follower replica must write the log entries into its own log and reply when the write is
 // committed. After that the follower can apply the log to its own storage.
 message ReplicaAppendLogRequest {
+    // The list of entries being replicated. It is supposed to be ordered in the LogEntryNumber order.
     repeated LogEntry entries = 1;
+
+    // Leader current term number.
+    int32 term_number = 2;
+
+    // The list of IP:PORT addresses of the replica group instances.
+    //
+    // This is just for convenience, to let followers do not worry about obtaining the list of all replicas.
+    // Followers are free to build a cache of the replica hosts, so that they could contact other nodes even
+    // if they don't register on the leader.
+    repeated string replica_addresses = 3;
+
+    // Last committed entry in the leader log.
+    LogEntryNumber last_committed_entry_number = 4;
+
+    // Number of the log entry immediately preceding the first log entry in the "entries" field in the leader log.
+    LogEntryNumber prev_entry_number = 5;
 }
 
 message ReplicaAppendLogResponse {
+    enum Status {
+        // The appended log suffix is okay, follower will commit it when instructed to do so.
+        OK = 0;
+        // The follower's log doesn't match the leader's: prev_entry_number from the request is not the same as the
+        // last entry in the follower's log
+        PREV_MISMATCH = 1;
+        //
+        REJECT = 2;
+    }
+
+    // Last entry that is committed on the follower.
     LogEntry last_committed_entry = 1;
+
+    // Response status.
+    Status status = 2;
+
+    // Replica's current term number.
+    int32 term_number = 3;
 }
 
 // The client may request addresses of the replica group instances from the leader to balance the
