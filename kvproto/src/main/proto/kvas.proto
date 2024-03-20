@@ -187,10 +187,12 @@ message ReplicaAppendLogResponse {
     enum Status {
         // The appended log suffix is okay, follower will commit it when instructed to do so.
         OK = 0;
+
         // The follower's log doesn't match the leader's: prev_entry_number from the request is not the same as the
         // last entry in the follower's log
         PREV_MISMATCH = 1;
-        //
+
+        // The follower rejects this response because it doesn't acknowledge the sender as an elected and legitimate leader.
         REJECT = 2;
     }
 
@@ -220,6 +222,31 @@ message ReplicaGetGroupResponse {
     repeated ShardInfo replicas = 1;
 }
 
+// Follower nodes that don't receive a heartbeat from the leader in their election timeout period will
+// become a candidate and will send this message to all members of the replica group.
+message LeaderElectionRequest {
+    // Requester term number.
+    int32 term_number = 1;
+
+    // IP:port address of the requester node;
+    string requester_address = 2;
+
+    // The last committed entry in the requester log
+    LogEntryNumber last_committed_entry_number = 3;
+}
+
+// Nodes that receive an election request from a candidate must respond with their decision.
+message LeaderElectionResponse {
+    // True if the voter votes for the requester.
+    bool is_granted = 1;
+
+    // Voter term number, to update the candidate (may be useful if candidate's term is falling behind)
+    int32 voter_term_number = 2;
+
+    // Voter IP:port address.
+    string voter_address = 3;
+}
+
 // GRPC server interface.
 service Kvas {
     rpc GetValue(KvasGetRequest) returns (KvasGetResponse) {}
@@ -233,4 +260,8 @@ service Kvas {
     rpc ReplicaJoinGroup(ReplicaJoinGroupRequest) returns (ReplicaJoinGroupResponse) {}
     rpc ReplicaAppendLog(ReplicaAppendLogRequest) returns (ReplicaAppendLogResponse) {}
     rpc ReplicaGetGroup(ReplicaGetGroupRequest) returns (ReplicaGetGroupResponse) {}
+
+
+    rpc LeaderElection(LeaderElectionRequest) returns (LeaderElectionResponse) {}
+
 }
