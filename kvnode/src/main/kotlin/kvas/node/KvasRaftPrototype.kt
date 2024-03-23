@@ -93,7 +93,7 @@ class KvasRaftNode(selfAddress: String, initialLeaderAddress: String, clusterSiz
   init {
     replicationScope.launch {
       replicationController.receiveReplicationResults { lastCommittedEntryNum ->
-        logLeaderReplication.debug("Entry {} replicated to quorum and shall be committed now", lastCommittedEntryNum)
+        logLeaderReplication.debug("Entry {} replicated to quorum and shall be committed now", lastCommittedEntryNum.toLogString())
         raftLog.lastCommittedEntryNum = lastCommittedEntryNum
       }
     }
@@ -206,7 +206,6 @@ class KvasRaftNode(selfAddress: String, initialLeaderAddress: String, clusterSiz
         leaderAddress = clusterInfo.leaderAddress
       }
     }
-    println("putValue: $request")
     return appendLog(request).andThen {
       // Try replicating this entry.
       replicationController.replicateToQuorum(it.entryNumber)
@@ -470,9 +469,8 @@ class RaftLogSender(
 ) : LogSender(0) {
 
   private val log = LoggerFactory.getLogger("Primary.AppendLog")
-  private val runLock = ReentrantLock()
   override fun run() {
-    log.info("Running LogSender to {}", replicaAddress)
+    log.debug("Running LogSender to {}", replicaAddress)
     replicationScope.launch {
       while (true) {
         val entry = logView.get()
@@ -536,7 +534,6 @@ class RaftLogView(private val entries: List<LogEntry>, private var pos: Int = 0)
   fun get(): LogEntry? = if (entries.size > pos) entries[pos] else null
 
   fun forward(): Boolean {
-    println("LogView.frward: entries size=${entries.size} pos=$pos")
     if (pos < entries.size) pos++
     return pos < entries.size
   }
@@ -563,7 +560,6 @@ class LogStorage {
   fun add(entry: LogEntry) {
     synchronized(entries) {
       entries.add(entry)
-      println("log entries size=${entries.size}")
     }
   }
 

@@ -21,7 +21,7 @@
     <logger name="Master.RegisterItself" level="INFO" />
     <logger name="Master.RegisterShard" level="INFO" />
     <logger name="Primary.RegisterReplica" level="DEBUG" />
-    <logger name="Primary.AppendLog" level="DEBUG" />
+    <logger name="Primary.AppendLog" level="INFO" />
     <logger name="Primary.Replication" level="DEBUG" />
     <logger name="Follower.AppendLog" level="DEBUG" />
     <logger name="Follower.Commit" level="DEBUG" />
