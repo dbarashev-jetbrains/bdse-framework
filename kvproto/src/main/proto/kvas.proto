@@ -65,12 +65,22 @@ message KvasPutResponse {
         // The node believes that the client needs to refresh its information about the shards
         // registered in the system.
         REFRESH_SHARDS = 1;
+        //
+        COMMIT_FAILED = 2;
+        //
+        // The recipient is read-only and can't process the request, however, it knows the address of a writable node.
+        // The latter may be found in the leader_address field.
+        REDIRECT = 3;
     }
     // Status code. The client must check the status code and do what the status code instructs.
     StatusCode code = 1;
 
     // Value version number for the protocols that use it.
     int32 version = 2;
+
+    // If the request was sent to a follower node, it may redirect to the leader and specify the leader address
+    // in this field.
+    string leader_address = 3;
 }
 
 // Shard information includes a node IP:port address and an integer token.
@@ -140,8 +150,8 @@ message ReplicaJoinGroupResponse {
 // The log entry number, consisting of the term number when this entry was appended to the leader's log and
 // the ordinal number of this entry in the leader's log.
 message LogEntryNumber {
-    int64 ordinal_number = 1;
-    int64 term_number = 2;
+    int32 ordinal_number = 1;
+    int32 term_number = 2;
 }
 
 // A log entry is a key-value pair with the ordinal number that is used for ordering the events.
@@ -181,6 +191,8 @@ message ReplicaAppendLogRequest {
 
     // Number of the log entry immediately preceding the first log entry in the "entries" field in the leader log.
     LogEntryNumber prev_entry_number = 5;
+
+    string sender_address = 6;
 }
 
 message ReplicaAppendLogResponse {
@@ -194,6 +206,9 @@ message ReplicaAppendLogResponse {
 
         // The follower rejects this response because it doesn't acknowledge the sender as an elected and legitimate leader.
         REJECT = 2;
+
+        // The follower is unavailable;
+        UNAVAILABLE = 3;
     }
 
     // Last entry that is committed on the follower.
@@ -231,8 +246,8 @@ message LeaderElectionRequest {
     // IP:port address of the requester node;
     string requester_address = 2;
 
-    // The last committed entry in the requester log
-    LogEntryNumber last_committed_entry_number = 3;
+    // The last entry in the requester log
+    LogEntryNumber last_log_entry_number = 3;
 }
 
 // Nodes that receive an election request from a candidate must respond with their decision.

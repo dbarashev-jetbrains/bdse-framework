@@ -60,12 +60,12 @@ class Main : CliktCommand() {
       }
     } else if (primary_?.isNotBlank() == true) {
       if (primary_ == "me") {
-        ServerBuilder.forPort(grpcPort).addService(KvasReplicationLeader(selfAddress)).build().start().also {
+        ServerBuilder.forPort(grpcPort).addService(KvasRaftNode(selfAddress, selfAddress, 3)).build().start().also {
           println("KVAS PRIMARY node started with self-address $selfAddress. Hit Ctrl+C to stop")
           it.awaitTermination()
         }
       } else {
-        ServerBuilder.forPort(grpcPort).addService(KvasReplicationFollower(selfAddress, primary_!!)).build().start()
+        ServerBuilder.forPort(grpcPort).addService(KvasRaftNode(selfAddress, primary_!!, 3)).build().start()
           .also {
             println("KVAS node started as a FOLLOWER with self-address $selfAddress and PRIMARY address $primary_. Hit Ctrl+C to stop")
             it.awaitTermination()
