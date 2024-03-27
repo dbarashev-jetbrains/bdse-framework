@@ -18,13 +18,14 @@
     <logger name="Node.GetValue" level="INFO" />
     <logger name="Node.PutValue" level="INFO" />
     <logger name="Node.MoveData" level="INFO" />
+    <logger name="Node.Election" level="DEBUG" />
     <logger name="Master.RegisterItself" level="INFO" />
     <logger name="Master.RegisterShard" level="INFO" />
     <logger name="Primary.RegisterReplica" level="DEBUG" />
     <logger name="Primary.AppendLog" level="INFO" />
     <logger name="Primary.Replication" level="DEBUG" />
     <logger name="Follower.AppendLog" level="DEBUG" />
-    <logger name="Follower.Commit" level="DEBUG" />
+    <logger name="Follower.CommitLog" level="DEBUG" />
     <logger name="com.zaxxer.hikari" level="INFO"/>
     <logger name="io.grpc.netty.NettyServerHandler" level="INFO"/>
 </configuration>
