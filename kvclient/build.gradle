@@ -20,6 +20,10 @@ dependencies {
     implementation "io.grpc:grpc-netty:$grpcVersion"
 
     implementation "com.github.ajalt.clikt:clikt:4.1.0"
+    implementation 'org.postgresql:postgresql:42.6.0'
+    implementation 'com.zaxxer:HikariCP:5.0.1'
+
+    implementation "redis.clients:jedis:4.4.3"
 
     implementation "ch.qos.logback:logback-classic:1.4.6"
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.+'

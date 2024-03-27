@@ -19,6 +19,9 @@ import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.runBlocking
+import kvas.proto.kvasOfflineRequest
+import kvas.util.kvas
+import kvas.util.toHostPort
 import kotlin.time.ExperimentalTime
 
 class Main: CliktCommand() {
@@ -87,8 +90,18 @@ class Replication: CliktCommand("Runs the load test against the replicate databa
   }
 }
 
+class SetAvailable: CliktCommand("Sets a node offline or online") {
+  val node by option(help="Node address in IP:port format")
+  val available by option(help="Is this nove available or not").choice("yes", "no")
+
+  override fun run() {
+    node?.toHostPort()?.let { kvas(it.first, it.second).setOffline(kvasOfflineRequest {
+      isOffline = "no".equals(available, ignoreCase = true)
+    }) }
+  }
+}
 fun main(args: Array<String>): Unit {
-  Main().subcommands(Sharding(), Replication()).main(args)
+  Main().subcommands(Sharding(), Replication(), SetAvailable()).main(args)
 }
 
 //fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)

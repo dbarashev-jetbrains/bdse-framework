@@ -30,7 +30,7 @@ import kotlin.concurrent.timer
  *
  * There is a dependency on linear hashing in moveData implementation.
  */
-open class KvasGrpcServer(protected val selfAddress: String) : KvasGrpcKt.KvasCoroutineImplBase() {
+open class KvasGrpcServer(val selfAddress: String) : KvasGrpcKt.KvasCoroutineImplBase() {
   // In-memory storage
   private val key2value = mutableMapOf<String, String>()
 

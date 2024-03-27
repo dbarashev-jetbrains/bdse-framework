@@ -23,6 +23,7 @@ dependencies {
     implementation 'com.zaxxer:HikariCP:5.0.1'
     implementation 'org.postgresql:postgresql:42.6.0'
     implementation "com.github.ajalt.clikt:clikt:4.1.0"
+    implementation "com.michael-bull.kotlin-result:kotlin-result:2.0.0"
 
     implementation "ch.qos.logback:logback-classic:1.4.8"
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.+'
