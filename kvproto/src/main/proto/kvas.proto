@@ -200,9 +200,8 @@ message ReplicaAppendLogResponse {
         // The appended log suffix is okay, follower will commit it when instructed to do so.
         OK = 0;
 
-        // The follower's log doesn't match the leader's: prev_entry_number from the request is not the same as the
-        // last entry in the follower's log
-        PREV_MISMATCH = 1;
+        // The follower's log doesn't match the leader's
+        LOG_MISMATCH = 1;
 
         // The follower rejects this response because it doesn't acknowledge the sender as an elected and legitimate leader.
         REJECT = 2;
@@ -219,6 +218,8 @@ message ReplicaAppendLogResponse {
 
     // Replica's current term number.
     int32 term_number = 3;
+
+    LogEntryNumber last_committed_entry_num = 4;
 }
 
 // The client may request addresses of the replica group instances from the leader to balance the
@@ -262,6 +263,12 @@ message LeaderElectionResponse {
     string voter_address = 3;
 }
 
+message KvasOfflineRequest {
+    bool is_offline = 1;
+}
+
+message KvasOfflineResponse {}
+
 // GRPC server interface.
 service Kvas {
     rpc GetValue(KvasGetRequest) returns (KvasGetResponse) {}
@@ -279,4 +286,5 @@ service Kvas {
 
     rpc LeaderElection(LeaderElectionRequest) returns (LeaderElectionResponse) {}
 
+    rpc SetOffline(KvasOfflineRequest) returns (KvasOfflineResponse) {}
 }

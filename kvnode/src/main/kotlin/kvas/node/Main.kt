@@ -26,7 +26,7 @@ class Main : CliktCommand() {
   val master: String by option(help = "Master address in IP:PORT format").default("")
   val selfAddress_: String by option(help = "This node address in IP:PORT format", names = arrayOf("--self-address")).default("")
   val primary_: String? by option("--primary", help = "IP[:PORT] address of the leader host in a replica group").optionalValue("me")
-
+  val raftClusterSize: Int by option(help = "How many nodes are in this Raft cluster").int().default(3)
   override fun run() {
     val selfAddress = if (selfAddress_ == "") {
       "127.0.0.1:$grpcPort"
@@ -60,12 +60,12 @@ class Main : CliktCommand() {
       }
     } else if (primary_?.isNotBlank() == true) {
       if (primary_ == "me") {
-        ServerBuilder.forPort(grpcPort).addService(KvasRaftNode(selfAddress, selfAddress, 3)).build().start().also {
+        ServerBuilder.forPort(grpcPort).addService(KvasRaftNode(selfAddress, selfAddress, raftClusterSize)).build().start().also {
           println("KVAS PRIMARY node started with self-address $selfAddress. Hit Ctrl+C to stop")
           it.awaitTermination()
         }
       } else {
-        ServerBuilder.forPort(grpcPort).addService(KvasRaftNode(selfAddress, primary_!!, 3)).build().start()
+        ServerBuilder.forPort(grpcPort).addService(KvasRaftNode(selfAddress, primary_!!, raftClusterSize)).build().start()
           .also {
             println("KVAS node started as a FOLLOWER with self-address $selfAddress and PRIMARY address $primary_. Hit Ctrl+C to stop")
             it.awaitTermination()
