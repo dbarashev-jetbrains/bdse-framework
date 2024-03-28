@@ -1,7 +1,10 @@
 package kvas.loadtest
 
 import io.grpc.ManagedChannelBuilder
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kvas.proto.*
+import kvas.proto.KvasGrpc.KvasBlockingStub
 import kvas.util.LinearHashing
 import kvas.util.toHostPort
 import kotlin.system.exitProcess
@@ -12,34 +15,71 @@ import kotlin.system.exitProcess
 class KvasLoadTestBackend(
   private val shardNumberPut: (String)->Int,
   private val shardNumberGet: (String)->Int = shardNumberPut,
-  private val shardStubFactory: (Int)->KvasGrpc.KvasBlockingStub?) : Backend {
+  private val address2shardNumber: (String)->Int?,
+  private val shardStubFactory: (Int)->KvasGrpc.KvasBlockingStub?,
+  private val replaceShard: (Int)->Int,
+  private val delayMs: Long = 0) : Backend {
 
   private val shard2stub = mutableMapOf<Int, KvasGrpc.KvasBlockingStub>()
   private val shard2requestCount = mutableMapOf<Int, Int>()
+  private var leaderShardNumber: Int = -1
+  private lateinit var leaderStub: KvasBlockingStub
+
   override val stats: String get() {
     return shard2requestCount.map { entry -> "Sent ${entry.value} requests to shard#${entry.key}" }.joinToString(separator = ", ")
   }
   override fun put(key: String, value: String) {
-    val shardNumber = shardNumberPut(key)
-    val stub = shard2stub.getOrPut(shardNumber) {
-      shardStubFactory(shardNumber) ?: error("Can't create stub for the shard $shardNumber")
+    if (delayMs > 0) {
+      runBlocking { delay(delayMs) }
     }
-
-    try {
-      shard2requestCount.increment(shardNumber)
-      val response = stub.putValue(kvasPutRequest {
-        this.key = key
-        this.value = value
-        this.shardToken = shardNumber
-      })
-      if (response.code != KvasProto.KvasPutResponse.StatusCode.OK) {
-        error("Response code for key $key is not OK: $response. Shard token=$shardNumber")
-        exitProcess(1)
+    if (leaderShardNumber == -1) {
+      leaderShardNumber = shardNumberPut(key)
+      leaderStub = shard2stub.getOrPut(leaderShardNumber) {
+        shardStubFactory(leaderShardNumber) ?: error("Can't create stub for the shard $leaderShardNumber")
       }
-    } catch (ex: Exception) {
-      println("Failed to PUT key=$key into a shard=$shardNumber")
-      ex.printStackTrace()
-      throw RuntimeException(ex)
+    }
+    var failureCounter = 0
+    while(true) {
+      try {
+        shard2requestCount.increment(leaderShardNumber)
+        val response = leaderStub.putValue(kvasPutRequest {
+          this.key = key
+          this.value = value
+          this.shardToken = leaderShardNumber
+        })
+        when (response.code) {
+          KvasProto.KvasPutResponse.StatusCode.REDIRECT -> {
+            leaderStub = address2shardNumber(response.leaderAddress)?.let {
+              leaderShardNumber = it
+              shard2stub.getOrPut(it) {
+                shardStubFactory(leaderShardNumber) ?: error("Can't create stub for the shard $leaderShardNumber")
+              }
+            } ?: error("Can't map address ${response.leaderAddress} to a node number")
+            println("Redirecting request to ${response.leaderAddress}, node#$leaderShardNumber")
+          }
+          KvasProto.KvasPutResponse.StatusCode.OK -> {
+            // nice!
+            break
+          }
+          else -> {
+            error("Response code for key $key is not OK: $response. Shard token=$leaderShardNumber")
+            exitProcess(1)
+          }
+        }
+      } catch (ex: Exception) {
+        failureCounter++
+        println("Failed to PUT key=$key into a shard=$leaderShardNumber")
+        leaderShardNumber = replaceShard(leaderShardNumber)
+        println("Replaced with shard $leaderShardNumber")
+        leaderStub = shard2stub.getOrPut(leaderShardNumber) {
+          shardStubFactory(leaderShardNumber) ?: error("Can't create stub for the shard $leaderShardNumber")
+        }
+        if (failureCounter > 10) {
+          throw RuntimeException(ex)
+        } else {
+          continue
+        }
+      }
     }
   }
 

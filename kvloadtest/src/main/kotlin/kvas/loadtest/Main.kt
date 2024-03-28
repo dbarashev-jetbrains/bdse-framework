@@ -66,6 +66,7 @@ class Replication: CliktCommand("Runs the load test against the replicate databa
   val connectionCount by option(help="How many connections shall be used for every node").int().default(1)
   val workload by option(help="What type of the workload shall be generated").enum<Workload>().default(Workload.MIXED)
   val leaderless by option(help="Is it a leader-based replication").flag()
+  val delayMs by option(help="Pause between the requests").int().default(0)
   init {
     context {
       helpFormatter = { MordantHelpFormatter(it, showDefaultValues = true) }
@@ -79,7 +80,7 @@ class Replication: CliktCommand("Runs the load test against the replicate databa
       }.start(wait = true)
     } else {
       runBlocking {
-        val result = runReplicationLoadTest(kvasAddress, leaderless, workload, connectionCount, keyCount)
+        val result = runReplicationLoadTest(kvasAddress, leaderless, workload, connectionCount, keyCount, delayMs.toLong())
         println("""
           |------------------------------------------------------------
           |$result
@@ -150,19 +151,25 @@ suspend fun runShardingLoadTest(masterAddress: String, workload: Workload, conne
     else -> return "Unknown sharding method $method"
   }
   return runTest(workload, keyCount, connectionCount) { backendNum ->
-    KvasLoadTestBackend(shardNumberPut = sharding::shardNumber, shardStubFactory = sharding::getStub)
+    KvasLoadTestBackend(shardNumberPut = sharding::shardNumber,
+      address2shardNumber = { TODO("Not yet implemented") },
+      replaceShard = {it},
+      shardStubFactory = sharding::getStub)
   }
 }
 
 @OptIn(ExperimentalTime::class)
-suspend fun runReplicationLoadTest(masterAddress: String, leaderless: Boolean,  workload: Workload, connectionCount: Int, keyCount: Int): String {
+suspend fun runReplicationLoadTest(masterAddress: String, leaderless: Boolean,  workload: Workload, connectionCount: Int, keyCount: Int, delayMs: Long): String {
   println("running ${if (leaderless) "leaderless" else "leader-based"} load test with master=${masterAddress} connection count=${connectionCount} and key count=${keyCount}")
   val replicaRouter = ReplicaRouter(masterAddress)
   return runTest(workload, keyCount, connectionCount) {replicaNum ->
     KvasLoadTestBackend(
       shardNumberPut = if (leaderless) replicaRouter::replicaRandomNumber else replicaRouter::replicaLeaderNumber,
       shardNumberGet = replicaRouter::replicaRandomNumber,
-      shardStubFactory = replicaRouter::getStub
+      address2shardNumber = replicaRouter::address2shardNumber,
+      shardStubFactory = replicaRouter::getStub,
+      delayMs = delayMs,
+      replaceShard = replicaRouter::replaceShard
     )
   }
 }
