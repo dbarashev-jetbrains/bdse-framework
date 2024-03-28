@@ -320,11 +320,16 @@ class KvasRaftNode(selfAddress: String, initialLeaderAddress: String, clusterSiz
    * By convention, leader's token is 0, this distinguishes the writeable leader from the read-only followers.
    */
   override suspend fun replicaGetGroup(request: KvasProto.ReplicaGetGroupRequest): KvasProto.ReplicaGetGroupResponse {
-    return replicaGetGroupResponse {
-      this.replicas.addAll(replicationController.replica2logSender.entries.map { entry ->
-        KvasProto.ShardInfo.newBuilder().setNodeAddress(entry.key).setShardToken(entry.value.replicaToken).build()
-      })
-      this.replicas.add(KvasProto.ShardInfo.newBuilder().setNodeAddress(selfAddress).setShardToken(0).build())
+    return if (this.state == RaftNodeState.LEADER) {
+      replicaGetGroupResponse {
+        this.replicas.addAll(replicationController.replica2logSender.entries.map { entry ->
+          KvasProto.ShardInfo.newBuilder().setNodeAddress(entry.key).setShardToken(entry.value.replicaToken).build()
+        })
+      }
+    } else {
+      kvasPool.kvas(this.clusterInfo.leaderAddress) {
+        replicaGetGroup(request)
+      }
     }
   }
 
