@@ -12,11 +12,11 @@ CLUSTER_COUNT = 10
 # How many points per cluster we will generate
 POINTS_PER_CLUSTER = 500
 # The points will be in a square [0, SQUARE_SIZE], [0, SQUARE_SIZE] (some points may go slightly beyond the bounds)
-SQUARE_SIZE = 10
+SQUARE_SIZE = 20
 # Radius around the cluster centroid where most points will be placed into
 CLUSTER_RADIUS = 0.4
 # The size of a data chunk
-# It is the same as the cluster size for convenience
+# It is the same as the cluster size for convenience.
 DATA_CHUNK_SIZE = POINTS_PER_CLUSTER
 # Output file prefix
 FILE_PREFIX = "kmeans/cluster_"

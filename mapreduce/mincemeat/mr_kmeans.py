@@ -1,4 +1,6 @@
-# This map-reduce is a stub for
+# This map-reduce is a stub for k-means clustering.
+# Feel free to modify this code as necessary.
+
 import argparse
 import mincemeat
 import mincemeat_inputs
@@ -85,7 +87,7 @@ if __name__ == '__main__':
     if args.plot_before:
         plot_data("kmeans")
 
-    results = s.run_server(password="changeme")
+    results = s.run_server()
 
     if args.plot_after:
         plot_data("kmeans")

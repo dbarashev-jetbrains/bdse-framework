@@ -19,6 +19,6 @@ s.map_input = mincemeat_inputs.FileMapInputLineByLine(sys.argv[1])
 s.mapfn = mapfn
 s.reducefn = reducefn
 
-results = s.run_server(password="changeme") 
+results = s.run_server()
 for key, value in sorted(results.items()):
     print(f"{key}: {value}")

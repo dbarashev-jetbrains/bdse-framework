@@ -23,5 +23,5 @@ s.map_input = DictMapInput(datasource)
 s.mapfn = mapfn
 s.reducefn = reducefn
 
-results = s.run_server(password="changeme")
+results = s.run_server()
 print(results)

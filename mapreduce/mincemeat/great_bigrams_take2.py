@@ -19,5 +19,5 @@ s.map_input = mincemeat_inputs.FileMapInput(sys.argv[1])
 s.mapfn = mapfn
 s.reducefn = reducefn
 
-results = s.run_server(password="changeme") 
+results = s.run_server()
 mincemeat.dump_results(results)
