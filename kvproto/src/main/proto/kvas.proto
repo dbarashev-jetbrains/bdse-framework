@@ -1,0 +1,171 @@
+// PLEASE DON'T EDIT THIS FILE
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasProto";
+import "google/protobuf/wrappers.proto";
+import "metadata.proto";
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Metadata service messages
+
+// Nodes must periodically send this request to the metadata node to register in the system, or
+// refresh the membership.
+// If the node is already registered, it must supply the assigned sharding token.
+message RegisterNodeRequest {
+  enum Role {
+    LEADER_NODE = 0;
+    REPLICA_NODE = 1;
+    RAFT_NODE = 2;
+  }
+  string node_address = 1;
+  google.protobuf.Int32Value shard_token = 2;
+  Role role = 3;
+}
+
+message RegisterNodeResponse {
+  enum StatusCode {
+    // Node was registered successfully.
+    OK = 0;
+    // A shard leader node failed to register because there is another node that is the shard leader
+    // with the same token
+    TOKEN_CONFLICT = 1;
+    // Registration failed because the replica provided an unknown shard token.
+    TOKEN_UNKNOWN = 2;
+    // Registration failed because of other reasons.
+    OTHER = 3;
+  }
+  // A shard token that has been assigned to this node.
+  int32 shard_token = 1;
+  // Registration status code.
+  StatusCode code = 2;
+  // The entire cluster metadata.
+  ClusterMetadata metadata = 3;
+}
+
+message GetNodesRequest{}
+
+message GetNodesResponse {
+  ClusterMetadata metadata = 1;
+}
+
+// Metadata service is responsible for keeping information about the cluster nodes.
+service MetadataService {
+  // Register a node as a cluster member.
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+
+  // Returns all registered nodes.
+  rpc GetNodes(GetNodesRequest) returns (GetNodesResponse) {}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Messages related to the cluster metadata changes.
+message ShardingChangeRequest {
+  ClusterMetadata metadata = 1;
+}
+
+message ShardingChangeResponse {}
+
+/**
+ * Nodes that implement this service will receive notifications from the metadata server whenever metadata changes.
+ */
+service MetadataListener {
+  rpc ShardingChange(ShardingChangeRequest) returns (ShardingChangeResponse) {}
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Messages and services of the data node.
+
+// Request to get a value by the specified key. The client must supply the request with
+// a shard_token value to let the node check if the request is routed correctly.
+message GetValueRequest {
+  // The row where the value shall be put to.
+  string rowKey = 1;
+  // The column name where the value shall be put into. Empty value means the default column.
+  string columnName = 2;
+  // Shard token from the metadata known to the client.
+  int32 shard_token = 3;
+  // True if the request is initiated by an "ambassador" node in the protocols where it makes sense.
+  bool is_ambassador = 6;
+}
+
+// Response to GetValue request.
+message GetValueResponse {
+  enum StatusCode {
+    // The request was processed by the node and the response is correct.
+    OK = 0;
+    // The node believes that the client needs to refresh its information about the shards
+    // registered in the system.
+    REFRESH_SHARDS = 1;
+    //
+    // The request failed because of storage issues.
+    STORAGE_ERROR = 2;
+  }
+  // The requested value. If the value is missing in the storage, this field shall be empty and
+  // GetValueResponse::hasValue will return false.
+  google.protobuf.StringValue value = 1;
+
+  // Status code. The client must check the status code and do what the status code instructs.
+  StatusCode code = 2;
+
+  // Value version number for the protocols that use it.
+  int64 version = 3;
+}
+
+// Request to put a value by the specified key. The client must supply the request with
+// a shard_token value to let the node check if the request is routed correctly.
+// In case if there is already such key in the storage, the node must update the value.
+message PutValueRequest {
+  // The row where the value shall be put into.
+  string rowKey = 1;
+
+  // The column name where the value shall be put into. Empty value means the default column.
+  string columnName = 2;
+  // Shard token from the metadata known to the client.
+  int32 shard_token = 3;
+  // New value for this key.
+  string value = 4;
+  // Value version that is known to the client.
+  google.protobuf.Int64Value version = 5;
+
+  // True if the request is initiated by an "ambassador" node in the protocols where it makes sense.
+  bool is_ambassador = 6;
+}
+
+// Response to PutValue request
+message PutValueResponse {
+  enum StatusCode {
+    // The request was processed by the node and the response is correct.
+    OK = 0;
+    // The node believes that the client needs to refresh its information about the shards
+    // registered in the system.
+    REFRESH_SHARDS = 1;
+    //
+    COMMIT_FAILED = 2;
+    //
+    // The recipient is read-only and can't process the request, however, it knows the address of a writable node.
+    // The latter may be found in the leader_address field.
+    REDIRECT = 3;
+    //
+    // The request failed because of storage issues.
+    STORAGE_ERROR = 4;
+  }
+  // Status code. The client must check the status code and do what the status code instructs.
+  StatusCode code = 1;
+
+  // Value version number for the protocols that use it.
+  int64 version = 2;
+
+  // If the request was sent to a follower node, it may redirect to the leader and specify the leader address
+  // in this field.
+  string leader_address = 3;
+}
+
+/**
+ * Interface implemented by a data storage node.
+ */
+service DataService {
+  rpc GetValue(GetValueRequest) returns (GetValueResponse) {}
+  rpc PutValue(PutValueRequest) returns (PutValueResponse) {}
+}
+

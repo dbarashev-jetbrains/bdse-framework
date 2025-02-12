@@ -1,0 +1,27 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '2.0.21'
+    id 'application'
+    id "org.jetbrains.kotlin.plugin.serialization" version "2.0.21"
+}
+
+group = 'com.example'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation "io.ktor:ktor-server-core:$ktorVersion"
+    implementation "io.ktor:ktor-server-netty:$ktorVersion"
+    implementation "io.ktor:ktor-server-content-negotiation:$ktorVersion"
+    implementation "io.ktor:ktor-serialization-kotlinx-json:$ktorVersion"
+    implementation "io.ktor:ktor-server-auth:$ktorVersion"
+    implementation "io.ktor:ktor-server-auth-jwt:$ktorVersion"
+}
+
+application {
+    mainClass = "kvas.cloudtest.HttpServerKt"
+}
+
+

@@ -1,0 +1,65 @@
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasDataTransferProto";
+import "google/protobuf/wrappers.proto";
+import "metadata.proto";
+import "shared.proto";
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Messages for the bulk data transfers between the nodes, e.g. when doing resharding.
+
+/**
+ * A node that requests a data transfer (the Destination node) from the other node (the Source node) must initiate the
+ * transfer by sending this message. The Source node must check if the request is valid, prepare data for the transfer
+ * if necessary, acquire the necessary locks, etc., and reply with the transfer ID. After that the Destination node must
+ * start the transfer as soon as possible by sending StartDataTransferRequest.
+ *
+ */
+message InitiateDataTransferRequest {
+  // IP:PORT address of the node that requests data transfer.
+  string requester_address = 1;
+  // Cluster metadata that is known to the requester.
+  ClusterMetadata cluster_metadata = 2;
+  // Implementation-specific conditions of building the transfer, e.g. row timestamps, row key prefixes, etc.
+  map<string, string> conditions = 3;
+}
+
+message InitiateDataTransferResponse {
+  int32 transfer_id = 1;
+}
+
+/**
+ * The Destination node must send this request as soon as it receives a positive InitiateDataTransferResponse from the
+ * Source node, and supply the transfer ID that was assigned in the initiate phase.
+ */
+message StartDataTransferRequest {
+  int32 transfer_id = 1;
+}
+
+/**
+ * The Destination node must send this request as soon as it has finished copying the data and has stored the data
+ * persistently. The Source node may now release the locks, delete the copied data or do other required clean-up
+ * procedures.
+ */
+message FinishDataTransferRequest {
+  int32 transfer_id = 1;
+}
+
+message FinishDataTransferResponse {}
+
+service DataTransferService {
+  /**
+   * Initiates a data transfer, where the message sender is the Destination node and the message receiver is the Source node.
+   */
+  rpc InitiateDataTransfer(InitiateDataTransferRequest) returns (InitiateDataTransferResponse) {}
+
+  /**
+   * Starts the actual data transfer and returns a stream of data rows.
+   */
+  rpc StartDataTransfer(StartDataTransferRequest) returns (stream DataRow) {}
+
+  /**
+   * Finishes the data transfer.
+   */
+  rpc FinishDataTransfer(FinishDataTransferRequest) returns (FinishDataTransferResponse) {}
+}

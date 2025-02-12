@@ -1,0 +1,45 @@
+// PLEASE DON'T EDIT THIS FILE
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasMetadataProto";
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Messages shared between different KVAS services.
+
+/**
+ * Information about a single node. It includes a node address in IP:PORT format, a shard token, a flag indicating
+ * whether the node is a replica or a leader, and a timestamp of the latest moment when the node was known to be alive.
+ */
+message NodeInfo {
+  // Node address in IP:PORT format
+  string node_address = 1;
+  // Shard token identifying the shard served by this node.
+  int32 shard_token = 2;
+  // Flag indicating if this node is a leader (false value) or replica (true value)
+  bool is_replica = 3;
+  // The latest moment when this node was seen alive (e.g. a metadata master received a registration request from it)
+  int64 last_heartbeat_ts = 4;
+}
+
+/**
+ * A replicated shard consists of a leader node and a few follower nodes.
+ */
+message ReplicatedShard {
+  NodeInfo leader = 1;
+  repeated NodeInfo followers = 2;
+  int32 shard_token = 3;
+}
+
+message RaftGroup {
+  repeated NodeInfo nodes = 1;
+}
+
+/**
+ * The whole cluster consists of a few replicated shards.
+ */
+message ClusterMetadata {
+  repeated ReplicatedShard shards = 1;
+  RaftGroup raftGroup = 2;
+}
+

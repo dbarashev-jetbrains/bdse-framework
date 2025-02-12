@@ -1,0 +1,20 @@
+// PLEASE DON'T EDIT THIS FILE
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasStatsProto";
+
+message GetStatisticsRequest {
+}
+message GetStatisticsResponse {
+  double read_success_rate = 1;
+  double write_success_rate = 2;
+}
+message ResetStatisticsRequest {
+}
+message ResetStatisticsResponse {
+}
+
+service Statistics {
+  rpc GetStatistics(GetStatisticsRequest) returns (GetStatisticsResponse) {}
+  rpc ResetStatistics(ResetStatisticsRequest) returns (ResetStatisticsResponse) {}
+}

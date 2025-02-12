@@ -1,0 +1,70 @@
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasRaftProto";
+import "google/protobuf/wrappers.proto";
+import "metadata.proto";
+import "shared.proto";
+import "replication.proto";
+
+// Follower nodes that don't receive a heartbeat from the leader in their election timeout period will
+// become a candidate and will send this message to all members of the replica group.
+message LeaderElectionRequest {
+  // Requester term number.
+  int32 term_number = 1;
+
+  // IP:port address of the requester node;
+  string node_address = 2;
+
+  // The last entry in the requester log
+  LogEntryNumber last_log_entry_number = 3;
+}
+
+message LeaderElectionResponse {
+  // True if the voter votes for the requester.
+  bool is_granted = 1;
+
+  // Voter term number, to update the candidate (may be useful if candidate's term is falling behind)
+  int32 voter_term_number = 2;
+
+  // Voter IP:port address.
+  string voter_address = 3;
+
+}
+
+service ElectionService {
+  rpc LeaderElection(LeaderElectionRequest) returns (LeaderElectionResponse) {}
+}
+
+
+message RaftAppendLogRequest {
+  LogEntry entry = 1;
+  string sender_address = 2;
+  int32 term_number = 3;
+  LogEntryNumber last_committed_entry = 4;
+}
+
+message RaftAppendLogResponse {
+  enum Status {
+    // The appended log suffix is okay, follower will commit it when instructed to do so.
+    OK = 0;
+
+    // The follower's log doesn't match the leader's
+    LOG_MISMATCH = 1;
+
+    // The follower rejects this response because it doesn't acknowledge the sender as an elected and legitimate leader.
+    REJECT = 2;
+
+    // The follower is unavailable;
+    UNAVAILABLE = 3;
+  }
+
+  // Response status.
+  Status status = 2;
+
+  int32 term_number = 3;
+  LogEntryNumber last_committed_entry = 4;
+}
+
+service RaftReplicationService {
+  rpc AppendLog(RaftAppendLogRequest) returns (RaftAppendLogResponse) {};
+}

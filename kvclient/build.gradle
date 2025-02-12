@@ -1,0 +1,30 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.kotlin.jvm' apply true
+    id 'application'
+}
+
+addCommonLibs(project)
+
+dependencies {
+    implementation project(':kvproto')
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
+    implementation "io.grpc:grpc-core:$grpcVersion"
+    implementation "io.grpc:grpc-protobuf:$grpcVersion"
+    implementation "io.grpc:grpc-kotlin-stub:1.3.0"
+    implementation "io.grpc:grpc-netty:$grpcVersion"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0"
+
+    implementation "com.github.ajalt.clikt:clikt-jvm:$clicktVersion"
+    implementation "org.postgresql:postgresql:$postgresqlVersion"
+    implementation "com.zaxxer:HikariCP:$hikariVersion"
+
+    implementation "redis.clients:jedis:4.4.3"
+}
+
+run {
+    standardInput = System.in
+}
+
+mainClassName = 'kvas.client.MainKt'

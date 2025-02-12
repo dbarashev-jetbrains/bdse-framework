@@ -1,0 +1,11 @@
+// PLEASE DON'T EDIT THIS FILE
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasSharedProto";
+
+message DataRow {
+  string key = 1;
+  map<string, string> values = 2;
+  map<string, string> metadata = 3;
+  int64 version = 4;
+}

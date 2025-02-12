@@ -1,0 +1,290 @@
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasLegacyProto";
+import "google/protobuf/wrappers.proto";
+
+// Just a key-value pair
+message KeyValue {
+  string key = 1;
+  string value = 2;
+}
+
+// Request to get a value by the specified key. The client must supply the request with
+// a shard_token value to let the node check if the request is routed correctly.
+message KvasGetRequest {
+  string key = 1;
+  int32 shard_token = 2;
+  // IP:PORT address of the client who issued the request, to make it possible to handle it depending on the client.
+  string client_address = 3;
+}
+
+// Response to GetValue request.
+message KvasGetResponse {
+  enum StatusCode {
+    // The request was processed by the node and the response is correct.
+    OK = 0;
+    // The node believes that the client needs to refresh its information about the shards
+    // registered in the system.
+    REFRESH_SHARDS = 1;
+  }
+  // The requested value. If the value is missing in the storage, this field shall be empty and
+  // KvasGetResponse::hasValue will return false.
+  google.protobuf.StringValue value = 1;
+
+  // Status code. The client must check the status code and do what the status code instructs.
+  StatusCode code = 2;
+
+  // Value version number for the protocols that use it.
+  int32 version = 3;
+}
+
+// Request to put a value by the specified key. The client must supply the request with
+// a shard_token value to let the node check if the request is routed correctly.
+// In case if there is already such key in the storage, the node must update the value.
+message KvasPutRequest {
+  // Key the value shall be associated with.
+  string key = 1;
+  // New value for this key.
+  string value = 2;
+
+  // Shard token from the metadata known to the client.
+  int32 shard_token = 3;
+
+  // Value version that is known to the client.
+  google.protobuf.Int32Value version = 4;
+
+  // IP:PORT address of the client who issued the request, to make it possible to handle it depending on the client.
+  string client_address = 5;
+}
+
+// Response to PutValue request
+message KvasPutResponse {
+  enum StatusCode {
+    // The request was processed by the node and the response is correct.
+    OK = 0;
+    // The node believes that the client needs to refresh its information about the shards
+    // registered in the system.
+    REFRESH_SHARDS = 1;
+    //
+    COMMIT_FAILED = 2;
+    //
+    // The recipient is read-only and can't process the request, however, it knows the address of a writable node.
+    // The latter may be found in the leader_address field.
+    REDIRECT = 3;
+  }
+  // Status code. The client must check the status code and do what the status code instructs.
+  StatusCode code = 1;
+
+  // Value version number for the protocols that use it.
+  int32 version = 2;
+
+  // If the request was sent to a follower node, it may redirect to the leader and specify the leader address
+  // in this field.
+  string leader_address = 3;
+}
+
+// Shard information includes a node IP:port address and an integer token.
+// The meaning of token value depends on the chosen sharding function.
+//
+// For a simple "hash value modulo the number of nodes" it is a remainder of the hash value
+// divided by the number of shards.
+// For consistent hashing, it is the upper bound of the ring segment served by this node.
+// For linear hashing, it is the shard number as calculated by LinearHashing::shardNumber function.
+message ShardInfo {
+  string node_address = 1;
+  int32 shard_token = 2;
+}
+
+// Shard must periodically send this request to the master node to register itself in the system, or
+// refresh the membership.
+// If the node is already registered, it must supply the assigned token.
+message RegisterShardRequest {
+  string node_address = 1;
+  google.protobuf.Int32Value shard_token = 2;
+}
+
+// In the response master send the status and the list of the currently available shards.
+message RegisterShardResponse {
+  enum StatusCode {
+    // Shard was registered successfully
+    OK = 0;
+    // Registration failed because the token conflicts with some other node.
+    TOKEN_CONFLICT = 1;
+    //
+    OTHER = 2;
+  }
+  int32 shard_token = 1;
+  StatusCode code = 2;
+  repeated ShardInfo shards = 3;
+}
+
+// A client may send this request to the master node to get a list of registered shards.
+message GetShardsRequest {
+}
+
+// Response to GetShards request.
+message GetShardsResponse {
+  repeated ShardInfo shards = 1;
+}
+
+message MoveDataRequest {
+  int32 destination_shard_token = 1;
+  repeated ShardInfo shards = 2;
+}
+
+// A new replica which joins a replication group sends this request to the current
+// leader node.
+message ReplicaJoinGroupRequest {
+  // IP[:port] address of the replica node.
+  string replica_address = 1;
+  // The last entry that was committed on this replica. Leave empty if there are no data on this replica.
+  // The leader will send AppendLog requests starting from the entry that follows the last committed.
+  LogEntryOld last_committed_entry = 2;
+}
+
+// If replica is registered successfully, it receives its replica number.
+message ReplicaJoinGroupResponse {
+  int32 replica_token = 1;
+}
+
+// The log entry number, consisting of the term number when this entry was appended to the leader's log and
+// the ordinal number of this entry in the leader's log.
+message LogEntryNumberOld {
+  int32 ordinal_number = 1;
+  int32 term_number = 2;
+}
+
+// A log entry is a key-value pair with the ordinal number that is used for ordering the events.
+message LogEntryOld {
+  // The key and the value
+  KeyValue kv = 1;
+  // Ordinal number of this log entry.
+  // DEPRECATED, in favor of entry_number field below.
+  int32 ordinal_number = 2;
+  // Flag indicating if this entry is committed
+  bool is_committed = 3;
+
+  // The number of this entry in the leader/follower log. REPLACES ordinal_number field above.
+  LogEntryNumberOld entry_number = 4;
+}
+
+// The leader replica sends these requests to the followers when key-values are updated.
+// Key-value pairs in the "entries" field must be in the order of their committing on the leader.
+// The follower replica must write the log entries into its own log and reply when the write is
+// committed. After that the follower can apply the log to its own storage.
+message ReplicaAppendLogRequest {
+  // The list of entries being replicated. It is supposed to be ordered in the LogEntryNumber order.
+  repeated LogEntryOld entries = 1;
+
+  // Leader current term number.
+  int32 term_number = 2;
+
+  // The list of IP:PORT addresses of the replica group instances.
+  //
+  // This is just for convenience, to let followers do not worry about obtaining the list of all replicas.
+  // Followers are free to build a cache of the replica hosts, so that they could contact other nodes even
+  // if they don't register on the leader.
+  repeated string replica_addresses = 3;
+
+  // Last committed entry in the leader log.
+  LogEntryNumberOld last_committed_entry_number = 4;
+
+  // Number of the log entry immediately preceding the first log entry in the "entries" field in the leader log.
+  LogEntryNumberOld prev_entry_number = 5;
+
+  string sender_address = 6;
+}
+
+message ReplicaAppendLogResponse {
+  enum Status {
+    // The appended log suffix is okay, follower will commit it when instructed to do so.
+    OK = 0;
+
+    // The follower's log doesn't match the leader's
+    LOG_MISMATCH = 1;
+
+    // The follower rejects this response because it doesn't acknowledge the sender as an elected and legitimate leader.
+    REJECT = 2;
+
+    // The follower is unavailable;
+    UNAVAILABLE = 3;
+  }
+
+  // Last entry that is committed on the follower.
+  LogEntryOld last_committed_entry = 1;
+
+  // Response status.
+  Status status = 2;
+
+  // Replica's current term number.
+  int32 term_number = 3;
+
+  LogEntryNumberOld last_committed_entry_num = 4;
+}
+
+// The client may request addresses of the replica group instances from the leader to balance the
+// load across all replicas.
+message ReplicaGetGroupRequest {
+}
+
+message ReplicaGetGroupResponse {
+  // The list of HOST[:PORT] addresses of the replica group instances.
+  // HOST is either an IP address or a node name; optional PORT number follows
+  // the HOST part and is separated with a colon.
+  //
+  // We use ShardInfo proto from the sharding section just because it is already available. It carries no sharding
+  // semantics in the context of replication.
+  // By convention, the shard-token of the leader node must be 0.
+  repeated ShardInfo replicas = 1;
+}
+
+// Follower nodes that don't receive a heartbeat from the leader in their election timeout period will
+// become a candidate and will send this message to all members of the replica group.
+message LeaderElectionRequestOld {
+  // Requester term number.
+  int32 term_number = 1;
+
+  // IP:port address of the requester node;
+  string requester_address = 2;
+
+  // The last entry in the requester log
+  LogEntryNumberOld last_log_entry_number = 3;
+}
+
+// Nodes that receive an election request from a candidate must respond with their decision.
+message LeaderElectionResponseOld {
+  // True if the voter votes for the requester.
+  bool is_granted = 1;
+
+  // Voter term number, to update the candidate (may be useful if candidate's term is falling behind)
+  int32 voter_term_number = 2;
+
+  // Voter IP:port address.
+  string voter_address = 3;
+}
+
+message KvasOfflineRequest {
+  bool is_offline = 1;
+}
+
+message KvasOfflineResponse {}
+
+// GRPC server interface.
+service Kvas {
+  rpc GetValue(KvasGetRequest) returns (KvasGetResponse) {}
+  rpc PutValue(KvasPutRequest) returns (KvasPutResponse) {}
+
+  rpc RegisterShard(RegisterShardRequest) returns (RegisterShardResponse) {}
+  rpc GetShards(GetShardsRequest) returns (GetShardsResponse) {}
+
+  rpc MoveData(MoveDataRequest) returns (stream KeyValue){}
+
+  rpc ReplicaJoinGroup(ReplicaJoinGroupRequest) returns (ReplicaJoinGroupResponse) {}
+  rpc ReplicaAppendLog(ReplicaAppendLogRequest) returns (ReplicaAppendLogResponse) {}
+  rpc ReplicaGetGroup(ReplicaGetGroupRequest) returns (ReplicaGetGroupResponse) {}
+
+
+  rpc LeaderElection(LeaderElectionRequestOld) returns (LeaderElectionResponseOld) {}
+
+  rpc SetOffline(KvasOfflineRequest) returns (KvasOfflineResponse) {}
+}

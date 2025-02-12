@@ -1,0 +1,60 @@
+syntax = "proto3";
+import "shared.proto";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasReplicationProto";
+
+
+// The log entry number, consisting of the ordinal number of this entry in the leader's log and the term number if
+// RAFT protocol is used.
+message LogEntryNumber {
+  // The ordinal number of this entry in the log.
+  // This may as well be used as a logical timestamp in the protocols where it makes sense.
+  int64 ordinal_number = 1;
+
+  // Term number in the RAFT protocol.
+  int32 term_number = 2;
+}
+
+// A log entry is a data row + some metainformation for the log records ordering.
+message LogEntry {
+  // The key and the value
+  DataRow data_row = 1;
+
+  // The number of this entry in the leader/follower log.
+  LogEntryNumber entry_number = 2;
+
+  // Flag indicating if this entry is committed on the leader node.
+  bool is_committed = 3;
+}
+
+message AppendLogRequest {
+  // The list of entries being replicated. It is supposed to be ordered in the LogEntryNumber order.
+  repeated LogEntry entries = 1;
+  string sender_address = 6;
+
+  RaftAppendLog raft_data = 7;
+}
+
+message RaftAppendLog {
+  int32 term_number = 1;
+  LogEntryNumber last_committed_entry = 2;
+}
+message AppendLogResponse {
+  enum Status {
+    // The appended log suffix is okay, follower will commit it when instructed to do so.
+    OK = 0;
+    // The follower rejects this response because it doesn't acknowledge the sender as an elected and legitimate leader.
+    REJECT = 2;
+  }
+
+  // Response status.
+  Status status = 2;
+
+  RaftAppendLog raft_data = 3;
+}
+
+
+service ReplicationFollower {
+  rpc AppendLog(AppendLogRequest) returns (AppendLogResponse) {}
+
+}
