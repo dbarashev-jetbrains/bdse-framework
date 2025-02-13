@@ -18,10 +18,10 @@
     <logger name="Node.GetValue" level="INFO"/>
     <logger name="Node.PutValue" level="INFO"/>
     <logger name="Node.MoveData" level="INFO"/>
-    <logger name="Node.Election" level="DEBUG"/>
     <logger name="Master.RegisterItself" level="INFO"/>
     <logger name="Master.RegisterShard" level="INFO"/>
     <logger name="Raft.AppendLog" level="INFO"/>
+    <logger name="Raft.Election" level="DEBUG"/>
     <logger name="Raft.Leader" level="INFO"/>
     <logger name="Raft.Leader.LogSender" level="DEBUG"/>
 

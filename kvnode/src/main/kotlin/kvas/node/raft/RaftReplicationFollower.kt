@@ -5,13 +5,16 @@ import kvas.node.storage.Storage
 import kvas.proto.KvasRaftProto
 import kvas.proto.KvasRaftProto.RaftAppendLogResponse
 import kvas.proto.KvasReplicationProto.LogEntryNumber
-import kvas.proto.RaftReplicationServiceGrpcKt
 import kvas.proto.raftAppendLogResponse
 import kvas.util.compareTo
 import kvas.util.toLogString
 import org.slf4j.LoggerFactory
 
-object RaftReplicationFollowers {
+interface AppendLogProtocol {
+    fun appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse
+}
+
+object AppendLogProtocols {
     val DEMO = "demo" to ::DemoReplicationFollower
     val REAL = "real" to { _: ClusterState, _: NodeState, _: Storage ->
         TODO("Task X: Implement your own RAFT replication follower")
@@ -23,25 +26,16 @@ class DemoReplicationFollower(
     private val clusterState: ClusterState,
     private val nodeState: NodeState,
     private val storage: Storage
-) : RaftReplicationServiceGrpcKt.RaftReplicationServiceCoroutineImplBase() {
+) : AppendLogProtocol {
     val log = LoggerFactory.getLogger("Raft.Follower")
 
-    override suspend fun appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse {
+    override fun appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse {
         return synchronized(nodeState) {
             _appendLog(request)
         }
     }
 
     fun _appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse {
-//        if (request.senderAddress == nodeState.address.toString()) {
-//            // log.debug(".. oh, that's me pinging myself, okay")
-//            return raftAppendLogResponse {
-//                this.status = RaftAppendLogResponse.Status.OK
-//                this.lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
-//                this.termNumber = nodeState.currentTerm
-//            }
-//        }
-//
         // Are we sure that the request comes from the most actual leader?
 
         // Otherwise the request looks legitimate and we start adding the entry to the local log and updating the
@@ -65,8 +59,12 @@ class DemoReplicationFollower(
         }
 
         if (request.hasEntry()) {
-            // If this follower code runs on the same node with the leader then the entry is already in the log storage.
-            // Otherwise we need to append it to the log.
+            // The entry that is being replicated may or may not be in the local log storage.
+            // The usual case when it is already in the storage is when this code is running on the leader:
+            // we have already put the entry to the log before we started replication, and now we're "replicating" it.
+            // However, it may as well be in the log because of other reasons, e.g. when a new leader completes
+            // the replication that was terminated with the death of the old one.
+
             val lastLogEntry = nodeState.logStorage.lastOrNull()?.entryNumber
             val requestLogEntryNum = request.entry.entryNumber
             if (lastLogEntry != null) {

@@ -49,7 +49,7 @@ class KvasNodeBuilder {
     var raftConfig: RaftConfig = RaftConfig(
         ElectionProtocols.DEMO.first,
         RaftReplicationLeaders.DEMO.first,
-        RaftReplicationFollowers.DEMO.first,
+        AppendLogProtocols.DEMO.first,
         LogStorages.IN_MEMORY.first,
     )
     var failureEmulator: OutageEmulator? = null
@@ -285,8 +285,8 @@ class RaftConfig(val electionProtocol: String, val leader: String, val follower:
 class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
     val electionProtocol by option("--election-protocol").choice(*ElectionProtocols.ALL.keys.toTypedArray())
         .default(ElectionProtocols.DEMO.first)
-    val follower by option("--follower").choice(*RaftReplicationFollowers.ALL.keys.toTypedArray())
-        .default(RaftReplicationFollowers.DEMO.first)
+    val follower by option("--follower").choice(*AppendLogProtocols.ALL.keys.toTypedArray())
+        .default(AppendLogProtocols.DEMO.first)
     val leader by option("--leader").choice(*RaftReplicationLeaders.ALL.keys.toTypedArray())
         .default(RaftReplicationLeaders.DEMO.first)
     val logImpl by option("--log").choice(*LogStorages.ALL.keys.toTypedArray()).default(LogStorages.IN_MEMORY.first)

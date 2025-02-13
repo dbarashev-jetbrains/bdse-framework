@@ -1,0 +1,17 @@
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "KvasOutageProto";
+import "google/protobuf/wrappers.proto";
+import "metadata.proto";
+
+message SetAvailableRequest{
+  string address = 1;
+  bool is_available = 2;
+}
+
+message SetAvailableResponse{}
+
+service OutageEmulatorService {
+  rpc SetAvailable(SetAvailableRequest) returns (SetAvailableResponse) {};
+  rpc SetConnection(SetAvailableRequest) returns (SetAvailableResponse) {};
+}
