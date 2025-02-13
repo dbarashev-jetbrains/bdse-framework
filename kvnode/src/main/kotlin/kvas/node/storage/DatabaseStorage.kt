@@ -6,6 +6,8 @@ import kvas.node.PostgresConfig
 import java.sql.SQLException
 import javax.sql.DataSource
 
+var globalPostgresConfig: PostgresConfig? = null
+
 fun createDataSource(config: PostgresConfig): DataSource {
     val hikariConfig = HikariConfig().apply {
         username = config.dbUser

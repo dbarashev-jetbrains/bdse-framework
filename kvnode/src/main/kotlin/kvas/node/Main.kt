@@ -17,10 +17,7 @@ import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import io.grpc.ManagedChannelBuilder
 import io.grpc.ServerBuilder
-import kvas.node.raft.ElectionProtocols
-import kvas.node.raft.RaftNode
-import kvas.node.raft.RaftReplicationFollowers
-import kvas.node.raft.RaftReplicationLeaders
+import kvas.node.raft.*
 import kvas.node.replication.ReplicationFollowerFactory
 import kvas.node.replication.ReplicationLeaderFactory
 import kvas.node.storage.*
@@ -52,7 +49,8 @@ class KvasNodeBuilder {
     var raftConfig: RaftConfig = RaftConfig(
         ElectionProtocols.DEMO.first,
         RaftReplicationLeaders.DEMO.first,
-        RaftReplicationFollowers.DEMO.first
+        RaftReplicationFollowers.DEMO.first,
+        LogStorages.IN_MEMORY.first,
     )
     var failureEmulator: OutageEmulator? = null
     var grpcPort = 9000
@@ -277,7 +275,7 @@ class Replication : ChainedCliktCommand<KvasNodeBuilder>() {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Commands and flags related to RAFT
-class RaftConfig(val electionProtocol: String, val leader: String, val follower: String) {
+class RaftConfig(val electionProtocol: String, val leader: String, val follower: String, val logImpl: String) {
     var isConfigured: Boolean = false
     override fun toString(): String {
         return """Raft: $electionProtocol election, $leader => $follower log replication"""
@@ -285,14 +283,13 @@ class RaftConfig(val electionProtocol: String, val leader: String, val follower:
 }
 
 class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
-    //    val electionTimeout by option("--election-timeout", help = "Election timeout in milliseconds").int().default(1000)
-//    val heartbeatTimeout by option("--heartbeat-timeout", help = "Heartbeat timeout in milliseconds").int().default(100)
     val electionProtocol by option("--election-protocol").choice(*ElectionProtocols.ALL.keys.toTypedArray())
         .default(ElectionProtocols.DEMO.first)
     val follower by option("--follower").choice(*RaftReplicationFollowers.ALL.keys.toTypedArray())
         .default(RaftReplicationFollowers.DEMO.first)
     val leader by option("--leader").choice(*RaftReplicationLeaders.ALL.keys.toTypedArray())
         .default(RaftReplicationLeaders.DEMO.first)
+    val logImpl by option("--log").choice(*LogStorages.ALL.keys.toTypedArray()).default(LogStorages.IN_MEMORY.first)
 
     init {
         context {
@@ -301,12 +298,14 @@ class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
     }
 
     override fun run(value: KvasNodeBuilder): KvasNodeBuilder {
-        value.raftConfig = RaftConfig(electionProtocol, leader, follower)
+        value.raftConfig = RaftConfig(electionProtocol, leader, follower, logImpl)
         value.raftConfig.isConfigured = true
         return value
     }
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Other options
 class Main : ChainedCliktCommand<KvasNodeBuilder>() {
     override val allowMultipleSubcommands: Boolean = true
     val grpcPort by option().int().default(9000)
@@ -334,6 +333,7 @@ class Main : ChainedCliktCommand<KvasNodeBuilder>() {
 
         when (val it = storageConfig) {
             is PostgresConfig -> {
+                globalPostgresConfig = it
                 kvasNodeBuilder.storage = DatabaseStorage(createDataSource(it), it)
             }
 

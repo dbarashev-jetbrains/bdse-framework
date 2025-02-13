@@ -3,8 +3,11 @@ package kvas.node.raft
 import io.grpc.StatusRuntimeException
 import kvas.proto.KvasRaftProto.LeaderElectionRequest
 import kvas.proto.KvasRaftProto.LeaderElectionResponse
+import kvas.proto.KvasReplicationProto
+import kvas.proto.KvasReplicationProto.*
 import kvas.proto.leaderElectionRequest
 import kvas.proto.leaderElectionResponse
+import kvas.util.NodeAddress
 import org.slf4j.LoggerFactory
 
 /**
@@ -12,7 +15,8 @@ import org.slf4j.LoggerFactory
  */
 object ElectionProtocols {
     val DEMO = "demo" to ::DemoElectionProtocol
-    val REAL = "real" to { _: ClusterState, _: NodeState -> TODO("Task X: implement your own RAFT election protocol") }
+    val REAL = "real" to { _: ClusterState, _: NodeState, _: (NodeAddress, LeaderElectionRequest) -> LeaderElectionResponse
+        -> TODO("Task X: implement your own RAFT election protocol") }
 
     val ALL = listOf(DEMO, REAL).toMap()
 }
@@ -61,7 +65,8 @@ interface ElectionProtocol {
  */
 class DemoElectionProtocol(
     private val clusterState: ClusterState,
-    private var nodeState: NodeState
+    private val nodeState: NodeState,
+    private val leaderElectionRpc: (NodeAddress, LeaderElectionRequest) -> LeaderElectionResponse
 ) : ElectionProtocol {
 
     val quorumSize get() = clusterState.quorumSize
@@ -81,7 +86,7 @@ class DemoElectionProtocol(
         val electionRequest = leaderElectionRequest {
             nodeAddress = nodeState.address.toString()
             termNumber = nodeState.currentTerm
-            lastLogEntryNumber = nodeState.lastLogEntry
+            lastLogEntryNumber = nodeState.logStorage.lastOrNull()?.entryNumber ?: LogEntryNumber.getDefaultInstance()
         }
         val grantedVotes = mutableSetOf<String>()
         grantedVotes.add(nodeState.address.toString())
@@ -97,7 +102,7 @@ class DemoElectionProtocol(
             }
             if (clusterState.isLeaderDead) {
                 try {
-                    val response = clusterState.sendElectionRequest(address, electionRequest)
+                    val response = leaderElectionRpc(address, electionRequest)
                     if (response.isGranted) {
                         grantedVotes.add(response.voterAddress)
                     }

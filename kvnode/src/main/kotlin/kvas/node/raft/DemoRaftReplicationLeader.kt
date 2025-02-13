@@ -259,7 +259,7 @@ class RaftLogSender(
 ) {
     private var isStopped = false
     private val log = LoggerFactory.getLogger("Raft.Leader.LogSender")
-    private val logView = nodeState.logStorage.createView()
+    private val logView = nodeState.logStorage.createIterator()
 
 
     private var appendLogJob: Job? = null

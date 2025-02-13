@@ -120,7 +120,7 @@ class DemoReplicationFollower(
             if (lastCommitted != request.lastCommittedEntry) {
                 // It is possible that the log on this node is not yet complete, because the replication is lagging.
                 // A missing entry is expected to replicate soon.
-                log.warn("The log on this node is not yet complete: ${nodeState.logStorage.toDebugString()}")
+                log.warn("The log on this node is not yet complete: ${nodeState.logStorage.toString()}")
                 return raftAppendLogResponse {
                     this.status = RaftAppendLogResponse.Status.LOG_MISMATCH
                     lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
@@ -140,7 +140,7 @@ class DemoReplicationFollower(
     private fun commitRange(firstEntry: LogEntryNumber, lastEntry: LogEntryNumber): LogEntryNumber {
         val log = LoggerFactory.getLogger("Raft.Follower.CommitLog")
         var lastCommitted = firstEntry
-        val commitView = nodeState.logStorage.createView()
+        val commitView = nodeState.logStorage.createIterator()
 
         commitView.positionAt(firstEntry)
         commitView.forward()

@@ -19,31 +19,77 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.timer
 import kotlin.random.Random
 
+/**
+ * Represents the roles that a node can take in a Raft-based distributed consensus algorithm.
+ */
 enum class RaftRole {
     FOLLOWER,
     CANDIDATE,
     LEADER
 }
 
+/**
+ * Represents the state of a node in a Raft-based distributed consensus system.
+ */
 interface NodeState {
+    /**
+     * The network address of the node, represented by its host and port values.
+     */
     val address: NodeAddress
-    var currentTerm: Int
-    val lastLogEntry: LogEntryNumber
-    val logStorage: InMemoryLogStorage
 
-    var raftRole: ObservableProperty<RaftRole>
+    /**
+     * The current term in the Raft protocol cycle that the node is participating in. This property is mutable and can be
+     * changed from the node implementation.
+     */
+    var currentTerm: Int
+
+    /**
+     * Represents the log storage for maintaining the replicated log entries on the node.
+     */
+    val logStorage: LogStorage
+
+    /**
+     * The current role of the node (follower, candidate, or leader). This can be changed based on the
+     * state of the Raft algorithm and can be observed to take the appropriate actions when the state changes.
+     */
+    val raftRole: ObservableProperty<RaftRole>
 }
 
+/**
+ * Represents the state of a cluster in a Raft-based system, providing details about the nodes, quorum size,
+ * leader status, and methods to enable communication and updates within the cluster.
+ */
 interface ClusterState {
+    /**
+     * The list of all nodes in a Raft cluster. The contents of this list may change as new nodes are added.
+     */
     val raftNodes: List<NodeAddress>
-    val quorumSize: Int get() = raftNodes.size / 2 + 1
-    fun sendElectionRequest(address: NodeAddress, req: LeaderElectionRequest): LeaderElectionResponse
 
+    /**
+     * The quorum size in this cluster. The value may change as new nodes are added.
+     */
+    val quorumSize: Int get() = raftNodes.size / 2 + 1
+
+    /**
+     * Returns true if the leader node is suspected to be dead (we have not heard from the leader for a while)
+     */
     val isLeaderDead: Boolean get() = false
+
+    /**
+     * The current leader address.
+     */
     val leaderAddress: NodeAddress get() = NodeAddress("127.0.0.1", 9000)
+
+    /**
+     * Updates leader information using the received log replication request.
+     */
     fun updateLeader(logRequest: RaftAppendLogRequest)
 }
 
+/**
+ * This is a Raft node instance. It initializes the state objects and implementations of different parts of the Raft
+ * protocol, registers this node in the metadata and sets up participation in the leader elections.
+ */
 class RaftNode(
     raftConfig: RaftConfig,
     private val selfAddress: NodeAddress,
@@ -51,7 +97,8 @@ class RaftNode(
     private val metadataStub: MetadataServiceGrpc.MetadataServiceBlockingStub
 ) {
 
-    private val logStorage = InMemoryLogStorage()
+    private val log = LoggerFactory.getLogger("Raft.Role")
+    private val logStorage = LogStorages.ALL[raftConfig.logImpl]!!.invoke()
     private val currentTerm = AtomicInteger(1)
     private val raftNodes = mutableListOf<NodeAddress>()
     private val nodeState = NodeStateImpl(selfAddress, currentTerm, logStorage)
@@ -80,7 +127,7 @@ class RaftNode(
                     }
                 }
             }
-            println("Role: $oldRole=>$newRole")
+            log.info("$oldRole=>$newRole")
             if (newRole == RaftRole.FOLLOWER && oldRole == RaftRole.FOLLOWER) {
                 Exception().printStackTrace()
             }
@@ -110,34 +157,31 @@ class RaftNode(
     }
 }
 
+/**
+ * Implementation of the node state interface.
+ */
 class NodeStateImpl(
     override val address: NodeAddress,
     private val _currentTerm: AtomicInteger,
-    override val logStorage: InMemoryLogStorage
+    override val logStorage: LogStorage
 ) : NodeState {
     override var currentTerm: Int
         get() = _currentTerm.get()
-        set(value) = _currentTerm.set(value)
+        set(value) {
+            if (value < _currentTerm.get()) {
+                error("New term $value is lower than current term ${_currentTerm.get()}")
+            } else _currentTerm.set(value)
+        }
 
-    override val lastLogEntry: LogEntryNumber
-        get() = logStorage.lastOrNull()?.entryNumber ?: LogEntryNumber.getDefaultInstance()
-    override var raftRole = ObservableProperty(RaftRole.FOLLOWER)
+    override val raftRole = ObservableProperty(RaftRole.FOLLOWER)
 }
 
+/**
+ * Implementation of the cluster state interface. It keeps track of the heartbeats from the leader
+ */
 class ClusterStateImpl(selfAddress: NodeAddress, override val raftNodes: List<NodeAddress>) : ClusterState {
     var heartbeatTs = AtomicLong(0)
     var leaderAddress_ = NodeAddress("127.0.0.1", 9000)
-    val electionPool = KvasPool<ElectionServiceBlockingStub>(selfAddress) {
-        ManagedChannelBuilder.forAddress(it.host, it.port).usePlaintext().build().let { channel ->
-            ElectionServiceGrpc.newBlockingStub(channel)
-        }
-    }
-
-    override fun sendElectionRequest(
-        address: NodeAddress,
-        req: LeaderElectionRequest
-    ): LeaderElectionResponse = electionPool.rpc(address) { leaderElection(req) }
-
 
     override val isLeaderDead: Boolean
         get() = System.currentTimeMillis() - heartbeatTs.get() >= HEARTBEAT_PERIOD
@@ -151,15 +195,27 @@ class ClusterStateImpl(selfAddress: NodeAddress, override val raftNodes: List<No
     }
 }
 
+/**
+ *
+ */
 class ElectionService(raftConfig: RaftConfig, clusterState: ClusterState, nodeState: NodeState) :
     ElectionServiceCoroutineImplBase() {
+    val electionPool = KvasPool<ElectionServiceBlockingStub>(nodeState.address) {
+        ManagedChannelBuilder.forAddress(it.host, it.port).usePlaintext().build().let { channel ->
+            ElectionServiceGrpc.newBlockingStub(channel)
+        }
+    }
     // Timer that initiates new leader elections.
     private val electionTimeout: Timer
     private val electionProtocol: ElectionProtocol
 
+    private fun sendElectionRequest(
+        address: NodeAddress,
+        req: LeaderElectionRequest
+    ): LeaderElectionResponse = electionPool.rpc(address) { leaderElection(req) }
 
     init {
-        electionProtocol = ElectionProtocols.ALL.getValue(raftConfig.electionProtocol).invoke(clusterState, nodeState)
+        electionProtocol = ElectionProtocols.ALL.getValue(raftConfig.electionProtocol).invoke(clusterState, nodeState, ::sendElectionRequest)
         electionTimeout = timer(
             "Election Timeout", initialDelay = HEARTBEAT_PERIOD * 1.5.toLong(),
             period = Random.nextLong(HEARTBEAT_PERIOD, HEARTBEAT_PERIOD * 2).also {

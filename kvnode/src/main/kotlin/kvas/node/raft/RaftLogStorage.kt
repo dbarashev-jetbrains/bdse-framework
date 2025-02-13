@@ -1,24 +1,60 @@
 package kvas.node.raft
 
+import kvas.node.storage.globalPostgresConfig
 import kvas.proto.KvasReplicationProto.LogEntry
 import kvas.proto.KvasReplicationProto.LogEntryNumber
 import kvas.util.ObservableProperty
 import kvas.util.compareTo
 import kvas.util.toLogString
 
+/**
+ * Interface representing a storage mechanism for log entries in a Raft node,
+ */
 interface LogStorage {
+    /**
+     * The number of the last entry that is committed on this node.
+     * This property is observable, and observers may do something when the last committed entry updates.
+     *
+     * The value defaults to the default instance of LogEntryNumber if no entries are committed.
+     */
     val lastCommittedEntryNum: ObservableProperty<LogEntryNumber>
+
+    /**
+     * Appends a log entry to the log.
+     */
     fun add(entry: LogEntry)
-    fun createView(): LogStorageView
+
+    /**
+     * Creates a view over the log.
+     */
+    fun createIterator(): LogIterator
+
+    /**
+     * Returns the last entry in the log or null if the log is empty.
+     */
     fun lastOrNull(): LogEntry?
 }
 
-interface LogStorageView {
+/**
+ * Represents an iterator over a sequence of log entries. The iterator supports navigation through the log
+ * entries and provides access to the entry at the specified position.
+ */
+interface LogIterator {
     val lastCommittedEntry: LogEntryNumber
 
     fun get(): LogEntry?
     fun forward(): Boolean
     fun positionAt(entry: LogEntryNumber)
+}
+
+/**
+ * All available implementations of the log storage.
+ */
+object LogStorages {
+    val IN_MEMORY = "memory" to ::InMemoryLogStorage
+    val DBMS = "dbms" to  { DatabaseLogStorage(globalPostgresConfig ?: error("Please specify DBMS connection options using --storage dbms command line flag")) }
+
+    val ALL = listOf(IN_MEMORY, DBMS).toMap()
 }
 
 class InMemoryLogStorage : LogStorage {
@@ -46,7 +82,9 @@ class InMemoryLogStorage : LogStorage {
         log.debug("Added entry ${entry.entryNumber.toLogString()}. All entries: ${this.toDebugString()}")
     }
 
-    override fun createView(): LogStorageView = RaftLogView(entries)
+    override fun createIterator(): LogIterator = InMemoryLogIterator(entries)
+
+    override fun toString() = toDebugString()
 
     fun toDebugString(): String =
         entries.map { it.entryNumber.toLogString() }.joinToString(separator = ", ")
@@ -60,7 +98,7 @@ class InMemoryLogStorage : LogStorage {
  * @param entries The list of log entries available in this view.
  * @param pos The current position in the list of entries.
  */
-internal class RaftLogView(private val entries: List<LogEntry>, private var pos: Int = entries.size) : LogStorageView {
+internal class InMemoryLogIterator(private val entries: List<LogEntry>, private var pos: Int = entries.size) : LogIterator {
     override val lastCommittedEntry: LogEntryNumber = synchronized(entries) {
         entries.lastOrNull()?.entryNumber ?: LogEntryNumber.getDefaultInstance()
     }
