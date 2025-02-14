@@ -5,11 +5,15 @@ package kvas.node
 
 import com.google.protobuf.Int32Value
 import com.google.protobuf.StringValue
+import io.grpc.ManagedChannelBuilder
+import kotlinx.coroutines.flow.Flow
 import kvas.node.storage.Storage
 import kvas.proto.*
+import kvas.proto.DataTransferServiceGrpc.DataTransferServiceBlockingStub
 import kvas.proto.KvasMetadataProto.ClusterMetadata
 import kvas.proto.KvasProto.*
 import kvas.setup.Sharding
+import kvas.util.KvasPool
 import kvas.util.NodeAddress
 import org.slf4j.LoggerFactory
 import kotlin.concurrent.timer
@@ -32,9 +36,10 @@ open class KvasDataNode(
     private val sharding: Sharding,
     initShardToken: () -> Int? = { null },
     private val registerNode: (RegisterNodeRequest) -> RegisterNodeResponse,
-    private val dataTransferService: DataTransferServiceGrpcKt.DataTransferServiceCoroutineImplBase,
+    private val dataTransferProtocol: DataTransferProtocol,
 ) : DataServiceGrpcKt.DataServiceCoroutineImplBase() {
 
+    private val dataTransferService = DataTransferServiceImpl(dataTransferProtocol)
     private var shardToken: Int? = initShardToken()
     private var clusterMetadata = clusterMetadata { }
 
@@ -171,17 +176,37 @@ open class KvasDataNode(
      * @param request The `ShardingChangeRequest` object containing the updated
      *                cluster metadata and sharding information.
      */
-    internal open fun onShardingChange(metadata: ClusterMetadata) {
+    internal fun onShardingChange(metadata: ClusterMetadata) {
         LOG.debug("Received a sharding change notification. The new shards={}", metadata)
         this.clusterMetadata = metadata
-        // TODO: write your code here and implement data transfer on re-sharding
+        val grpcPool = KvasPool<DataTransferServiceBlockingStub>(selfAddress) { nodeAddress ->
+            DataTransferServiceGrpc.newBlockingStub(
+                ManagedChannelBuilder.forAddress(nodeAddress.host, nodeAddress.port).usePlaintext().build()
+            )
+        }
+        grpcPool.use { pool ->
+            dataTransferProtocol.onMetadataChange(metadata, pool)
+        }
     }
 
-    internal open fun createDataTransferService(): DataTransferServiceGrpcKt.DataTransferServiceCoroutineImplBase {
+    internal fun createDataTransferService(): DataTransferServiceGrpcKt.DataTransferServiceCoroutineImplBase {
         return dataTransferService
     }
 }
 
+internal class DataTransferServiceImpl(private val dataTransferProtocol: DataTransferProtocol): DataTransferServiceGrpcKt.DataTransferServiceCoroutineImplBase() {
+    override suspend fun initiateDataTransfer(request: KvasDataTransferProto.InitiateDataTransferRequest): KvasDataTransferProto.InitiateDataTransferResponse {
+        return dataTransferProtocol.initiateDataTransfer(request)
+    }
+
+    override fun startDataTransfer(request: KvasDataTransferProto.StartDataTransferRequest): Flow<KvasSharedProto.DataRow> {
+        return dataTransferProtocol.startDataTransfer(request)
+    }
+
+    override suspend fun finishDataTransfer(request: KvasDataTransferProto.FinishDataTransferRequest): KvasDataTransferProto.FinishDataTransferResponse {
+        return dataTransferProtocol.finishDataTransfer(request)
+    }
+}
 internal class MetadataListenerImpl(private val onChange: (ShardingChangeRequest) -> Unit) :
     MetadataListenerGrpcKt.MetadataListenerCoroutineImplBase() {
     override suspend fun shardingChange(request: ShardingChangeRequest): KvasProto.ShardingChangeResponse {

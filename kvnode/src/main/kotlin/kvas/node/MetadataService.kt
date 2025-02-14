@@ -36,14 +36,14 @@ data class ReplicaGroup(val shardToken: Int, val leader: NodeAddress, val follow
             this.nodeAddress = this@ReplicaGroup.leader.toString()
             this.shardToken = this@ReplicaGroup.shardToken
             this.isReplica = false
-            this.lastHeartbeatTs = this@ReplicaGroup.leader.lastHeartbeat
+            //this.lastHeartbeatTs = this@ReplicaGroup.leader.lastHeartbeat
         }
         this.followers.addAll(this@ReplicaGroup.followers.map {
             nodeInfo {
                 this.nodeAddress = it.toString()
                 this.shardToken = this@ReplicaGroup.shardToken
                 this.isReplica = true
-                this.lastHeartbeatTs = it.lastHeartbeat
+                //this.lastHeartbeatTs = it.lastHeartbeat
             }
         })
     }

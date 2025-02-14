@@ -62,7 +62,7 @@ class KvasNodeBuilder {
     var metadataConfig: MetadataConfig = MetadataConfig(isMaster = true, masterAddress = selfAddress)
     var storage: Storage = InMemoryStorage()
     var sharding: Sharding = NaiveSharding
-    var dataTransferServiceImpl: String = DataTransferServices.DEMO.first
+    var dataTransferServiceImpl: String = DataTransferProtocols.DEMO.first
     var replicationConfig: ReplicationConfig = ReplicationConfig(isFollower = false, impl = "void")
     val metadataListeners = mutableListOf<OnMetadataChange>()
 
@@ -94,7 +94,7 @@ class KvasNodeBuilder {
         }
     }
 
-    // If failure emulator is configured, wraps the storage into a proxy that fails and recovers with the specified probabilities.
+    // If a failure emulator is configured, wraps the storage into a proxy that fails and recovers with the specified probabilities.
     private fun createFailingStorage(delegate: Storage): Storage =
         this.failureEmulator?.let { FailingStorage(it, delegate) } ?: delegate
 
@@ -116,7 +116,7 @@ class KvasNodeBuilder {
         val dataService = KvasDataNode(
             selfAddress = this.selfAddress, storage = statisticsStorage,
             sharding = this.sharding,
-            dataTransferService = DataTransferServices.ALL[this.dataTransferServiceImpl]!!.invoke(this.storage),
+            dataTransferProtocol = DataTransferProtocols.ALL[this.dataTransferServiceImpl]!!.invoke(sharding, selfAddress, storage),
             registerNode = {
                 metadataStub.registerNode(
                     it.toBuilder()
@@ -318,8 +318,8 @@ class Main : ChainedCliktCommand<KvasNodeBuilder>() {
         *AllShardings.ALL.keys.toTypedArray()
     ).default(AllShardings.NAIVE.first)
     val dataTransfer by option("--data-transfer").choice(
-        *DataTransferServices.ALL.keys.toTypedArray()
-    ).default(DataTransferServices.DEMO.first)
+        *DataTransferProtocols.ALL.keys.toTypedArray()
+    ).default(DataTransferProtocols.DEMO.first)
 
     init {
         context {

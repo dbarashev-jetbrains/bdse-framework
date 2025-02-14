@@ -76,6 +76,10 @@ object NotImplementedSharding : Sharding {
     }
 }
 
+/**
+ * Raft sharding is not really a sharding. It is rather a hack to let the client find out the Raft nodes from the
+ * cluster metadata.
+ */
 object RaftSharding : Sharding {
     override fun calculateShard(key: String, metadata: ClusterMetadata): ReplicatedShard {
         return replicatedShard {
@@ -85,8 +89,13 @@ object RaftSharding : Sharding {
     }
 
     override fun createNewToken(shards: List<NodeInfo>): Int {
-        TODO("Not yet implemented")
+        TODO("Not supposed to be implemented")
     }
+
+    override fun toString(): String {
+        return "Raft sharding serves for the client purposes only."
+    }
+
 
 }
 

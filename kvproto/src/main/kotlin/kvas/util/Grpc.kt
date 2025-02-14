@@ -55,10 +55,14 @@ fun String.toHostPort(defaultPort: Int = 9000) = this.split(':').let {
     }
 }
 
+interface GrpcPool<Stub : AbstractBlockingStub<Stub>> : AutoCloseable {
+    fun <T> rpc(address: NodeAddress, code: Stub.() -> T): T
+}
+
 class KvasPool<Stub : AbstractBlockingStub<Stub>>(
     private val selfAddress: NodeAddress,
     private val stubFactory: (NodeAddress) -> Stub
-) : AutoCloseable {
+) : GrpcPool<Stub> {
     var isNodeOffline = false
         set(value) {
             println(
@@ -72,7 +76,7 @@ class KvasPool<Stub : AbstractBlockingStub<Stub>>(
         }
     private val stubs = mutableMapOf<NodeAddress, Stub>()
 
-    fun <T> rpc(address: NodeAddress, code: Stub.() -> T) =
+    override fun <T> rpc(address: NodeAddress, code: Stub.() -> T) =
         if (address != selfAddress && isNodeOffline) throw RuntimeException("This node is currently offline")
         else code(stubs.getOrPut(address) { stubFactory(address) })
 

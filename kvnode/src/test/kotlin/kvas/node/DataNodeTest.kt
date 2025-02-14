@@ -39,7 +39,7 @@ class DataNodeTest {
                     metadata = createMetadata(shardCount = 1)
                 }
             },
-            dataTransferService = DummyDataTransferService(storage)
+            dataTransferProtocol = VoidDataTransferProtocol()
         )
         dataNode.registerItself()
         runBlocking {
@@ -85,7 +85,7 @@ class DataNodeTest {
                     metadata = createMetadata(shardCount = 2)
                 }
             },
-            dataTransferService = DummyDataTransferService(storage)
+            dataTransferProtocol = VoidDataTransferProtocol()
         )
         dataNode.registerItself()
         runBlocking {
@@ -115,7 +115,7 @@ class DataNodeTest {
                     metadata = createMetadata(shardCount = shardCount)
                 }
             },
-            dataTransferService = DummyDataTransferService(storage)
+            dataTransferProtocol = VoidDataTransferProtocol()
         )
         dataNode.registerItself()
         runBlocking {
