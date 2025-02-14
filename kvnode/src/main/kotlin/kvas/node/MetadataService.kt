@@ -30,20 +30,24 @@ data class ReplicaGroup(val shardToken: Int, val leader: NodeAddress, val follow
         }.toList()
     }
 
-    fun asProto() = replicatedShard {
+    fun asProto(withTimestamps: Boolean) = replicatedShard {
         this.shardToken = this@ReplicaGroup.shardToken
         this.leader = nodeInfo {
             this.nodeAddress = this@ReplicaGroup.leader.toString()
             this.shardToken = this@ReplicaGroup.shardToken
             this.isReplica = false
-            //this.lastHeartbeatTs = this@ReplicaGroup.leader.lastHeartbeat
+            if (withTimestamps) {
+                this.lastHeartbeatTs = this@ReplicaGroup.leader.lastHeartbeat
+            }
         }
         this.followers.addAll(this@ReplicaGroup.followers.map {
             nodeInfo {
                 this.nodeAddress = it.toString()
                 this.shardToken = this@ReplicaGroup.shardToken
                 this.isReplica = true
-                //this.lastHeartbeatTs = it.lastHeartbeat
+                if (withTimestamps) {
+                    this.lastHeartbeatTs = it.lastHeartbeat
+                }
             }
         })
     }
@@ -67,8 +71,8 @@ class MetadataMaster(
         get() = token2replicaGroup.values.flatMap { it.asNodeInfoList() }
             .toList() + raftNodes.map { nodeInfo { nodeAddress = it } }
 
-    private fun buildMetadataProto() = clusterMetadata {
-        this.shards.addAll(token2replicaGroup.entries.sortedBy { it.key }.map { it.value.asProto() })
+    private fun buildMetadataProto(withTimestamps: Boolean = false) = clusterMetadata {
+        this.shards.addAll(token2replicaGroup.entries.sortedBy { it.key }.map { it.value.asProto(withTimestamps) })
         this.raftGroup = raftGroup {
             this.nodes.addAll(raftNodes.sorted().map {
                 nodeInfo {
@@ -98,7 +102,7 @@ class MetadataMaster(
             if (metadataBefore != metadataAfter) {
                 onShardingChange()
             }
-            return result
+            return result.toBuilder().setMetadata(buildMetadataProto(withTimestamps = true)).build()
         }
     } catch (ex: Throwable) {
         LOGGER.error("Failure in registerNode(): ", ex)
@@ -168,7 +172,7 @@ class MetadataMaster(
 
     private fun onShardingChange() {
         val shardingChangeRequest = shardingChangeRequest {
-            this.metadata = this@MetadataMaster.buildMetadataProto()
+            this.metadata = this@MetadataMaster.buildMetadataProto(withTimestamps = true)
         }
         onShardingChange(allNodes, shardingChangeRequest)
     }
