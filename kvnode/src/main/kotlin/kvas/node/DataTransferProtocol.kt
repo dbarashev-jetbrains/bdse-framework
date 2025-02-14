@@ -34,13 +34,16 @@ interface DataTransferDestination {
      * this method is invoked). The implementation is supposed to initiate data transfer protocol by calling the
      * methods of DataTransferService on other cluster nodes.
      */
-    fun onMetadataChange(metadata: KvasMetadataProto.ClusterMetadata, grpcPool: GrpcPool<DataTransferServiceBlockingStub>)
+    fun onMetadataChange(
+        metadata: KvasMetadataProto.ClusterMetadata,
+        grpcPool: GrpcPool<DataTransferServiceBlockingStub>
+    )
 }
 
 /**
  * This interface combines the methods of a data transfer source and destination, just for convenience.
  */
-interface DataTransferProtocol: DataTransferSource, DataTransferDestination
+interface DataTransferProtocol : DataTransferSource, DataTransferDestination
 
 /**
  * All available implementations of the data transfer protocol.
@@ -62,7 +65,11 @@ object DataTransferProtocols {
  * requests them, and just puts all the values to the storage on the destination node. De-facto it creates a replica of
  * data from all nodes in the cluster.
  */
-class DemoDataTransferProtocol(private val sharding: Sharding, private val selfAddress: NodeAddress, private val storage: Storage) : DataTransferProtocol {
+class DemoDataTransferProtocol(
+    private val sharding: Sharding,
+    private val selfAddress: NodeAddress,
+    private val storage: Storage
+) : DataTransferProtocol {
     override fun initiateDataTransfer(request: KvasDataTransferProto.InitiateDataTransferRequest) =
         initiateDataTransferResponse {
             this.transferId = -1
@@ -87,7 +94,10 @@ class DemoDataTransferProtocol(private val sharding: Sharding, private val selfA
         }
     }
 
-    private fun transferData(shard: KvasMetadataProto.ReplicatedShard, grpcPool: GrpcPool<DataTransferServiceBlockingStub>) {
+    private fun transferData(
+        shard: KvasMetadataProto.ReplicatedShard,
+        grpcPool: GrpcPool<DataTransferServiceBlockingStub>
+    ) {
         val nodeAddess = shard.leader.nodeAddress.toNodeAddress()
         grpcPool.rpc(nodeAddess) {
             println("Transferring data for shard=$shard from node=$nodeAddess")

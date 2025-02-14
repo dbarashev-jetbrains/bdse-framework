@@ -52,7 +52,12 @@ interface LogIterator {
  */
 object LogStorages {
     val IN_MEMORY = "memory" to ::InMemoryLogStorage
-    val DBMS = "dbms" to  { DatabaseLogStorage(globalPostgresConfig ?: error("Please specify DBMS connection options using --storage dbms command line flag")) }
+    val DBMS = "dbms" to {
+        DatabaseLogStorage(
+            globalPostgresConfig
+                ?: error("Please specify DBMS connection options using --storage dbms command line flag")
+        )
+    }
 
     val ALL = listOf(IN_MEMORY, DBMS).toMap()
 }
@@ -98,7 +103,8 @@ class InMemoryLogStorage : LogStorage {
  * @param entries The list of log entries available in this view.
  * @param pos The current position in the list of entries.
  */
-internal class InMemoryLogIterator(private val entries: List<LogEntry>, private var pos: Int = entries.size) : LogIterator {
+internal class InMemoryLogIterator(private val entries: List<LogEntry>, private var pos: Int = entries.size) :
+    LogIterator {
     override val lastCommittedEntry: LogEntryNumber = synchronized(entries) {
         entries.lastOrNull()?.entryNumber ?: LogEntryNumber.getDefaultInstance()
     }

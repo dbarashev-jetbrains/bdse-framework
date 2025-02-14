@@ -116,7 +116,11 @@ class KvasNodeBuilder {
         val dataService = KvasDataNode(
             selfAddress = this.selfAddress, storage = statisticsStorage,
             sharding = this.sharding,
-            dataTransferProtocol = DataTransferProtocols.ALL[this.dataTransferServiceImpl]!!.invoke(sharding, selfAddress, storage),
+            dataTransferProtocol = DataTransferProtocols.ALL[this.dataTransferServiceImpl]!!.invoke(
+                sharding,
+                selfAddress,
+                storage
+            ),
             registerNode = {
                 metadataStub.registerNode(
                     it.toBuilder()

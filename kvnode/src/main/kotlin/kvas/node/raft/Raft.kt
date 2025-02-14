@@ -161,13 +161,15 @@ class RaftNode(
     }
 }
 
-class RaftReplicationFollowerImpl(private val appendLogProtocol: AppendLogProtocol, private val nodeState: NodeState) : RaftReplicationServiceGrpcKt.RaftReplicationServiceCoroutineImplBase() {
+class RaftReplicationFollowerImpl(private val appendLogProtocol: AppendLogProtocol, private val nodeState: NodeState) :
+    RaftReplicationServiceGrpcKt.RaftReplicationServiceCoroutineImplBase() {
     override suspend fun appendLog(request: RaftAppendLogRequest): RaftAppendLogResponse {
         if (nodeState.isOnline) {
             return appendLogProtocol.appendLog(request)
         } else throw RuntimeException("Node is not online")
     }
 }
+
 /**
  * Implementation of the node state interface.
  */
@@ -223,6 +225,7 @@ class ElectionService(raftConfig: RaftConfig, clusterState: ClusterState, nodeSt
             ElectionServiceGrpc.newBlockingStub(channel)
         }
     }
+
     // Timer that initiates new leader elections.
     private val electionTimeout: Timer
     private val electionProtocol: ElectionProtocol
@@ -233,8 +236,10 @@ class ElectionService(raftConfig: RaftConfig, clusterState: ClusterState, nodeSt
     ): LeaderElectionResponse = electionPool.rpc(address) { leaderElection(req) }
 
     init {
-        electionProtocol = ElectionProtocols.ALL.getValue(raftConfig.electionProtocol).invoke(clusterState, nodeState, ::sendElectionRequest)
-        electionTimeout = timer("Election Timeout",
+        electionProtocol = ElectionProtocols.ALL.getValue(raftConfig.electionProtocol)
+            .invoke(clusterState, nodeState, ::sendElectionRequest)
+        electionTimeout = timer(
+            "Election Timeout",
             initialDelay = (HEARTBEAT_PERIOD * 1.5).toLong(),
             period = Random.nextLong(HEARTBEAT_PERIOD, HEARTBEAT_PERIOD * 2).also {
                 LoggerFactory.getLogger("Raft.Election").info("Election timeout={}", it)

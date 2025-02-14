@@ -194,7 +194,8 @@ open class KvasDataNode(
     }
 }
 
-internal class DataTransferServiceImpl(private val dataTransferProtocol: DataTransferProtocol): DataTransferServiceGrpcKt.DataTransferServiceCoroutineImplBase() {
+internal class DataTransferServiceImpl(private val dataTransferProtocol: DataTransferProtocol) :
+    DataTransferServiceGrpcKt.DataTransferServiceCoroutineImplBase() {
     override suspend fun initiateDataTransfer(request: KvasDataTransferProto.InitiateDataTransferRequest): KvasDataTransferProto.InitiateDataTransferResponse {
         return dataTransferProtocol.initiateDataTransfer(request)
     }
@@ -207,6 +208,7 @@ internal class DataTransferServiceImpl(private val dataTransferProtocol: DataTra
         return dataTransferProtocol.finishDataTransfer(request)
     }
 }
+
 internal class MetadataListenerImpl(private val onChange: (ShardingChangeRequest) -> Unit) :
     MetadataListenerGrpcKt.MetadataListenerCoroutineImplBase() {
     override suspend fun shardingChange(request: ShardingChangeRequest): KvasProto.ShardingChangeResponse {

@@ -3,8 +3,7 @@ package kvas.node.raft
 import io.grpc.StatusRuntimeException
 import kvas.proto.KvasRaftProto.LeaderElectionRequest
 import kvas.proto.KvasRaftProto.LeaderElectionResponse
-import kvas.proto.KvasReplicationProto
-import kvas.proto.KvasReplicationProto.*
+import kvas.proto.KvasReplicationProto.LogEntryNumber
 import kvas.proto.leaderElectionRequest
 import kvas.proto.leaderElectionResponse
 import kvas.util.NodeAddress
@@ -15,8 +14,11 @@ import org.slf4j.LoggerFactory
  */
 object ElectionProtocols {
     val DEMO = "demo" to ::DemoElectionProtocol
-    val REAL = "real" to { _: ClusterState, _: NodeState, _: (NodeAddress, LeaderElectionRequest) -> LeaderElectionResponse
-        -> TODO("Task X: implement your own RAFT election protocol") }
+    val REAL =
+        "real" to { _: ClusterState, _: NodeState, _: (NodeAddress, LeaderElectionRequest) -> LeaderElectionResponse
+            ->
+            TODO("Task X: implement your own RAFT election protocol")
+        }
 
     val ALL = listOf(DEMO, REAL).toMap()
 }
