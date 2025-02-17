@@ -30,15 +30,10 @@ message LogEntry {
 message AppendLogRequest {
   // The list of entries being replicated. It is supposed to be ordered in the LogEntryNumber order.
   repeated LogEntry entries = 1;
-  string sender_address = 6;
-
-  RaftAppendLog raft_data = 7;
+  // IP:PORT address of the log sender node.
+  string sender_address = 2;
 }
 
-message RaftAppendLog {
-  int32 term_number = 1;
-  LogEntryNumber last_committed_entry = 2;
-}
 message AppendLogResponse {
   enum Status {
     // The appended log suffix is okay, follower will commit it when instructed to do so.
@@ -49,12 +44,9 @@ message AppendLogResponse {
 
   // Response status.
   Status status = 2;
-
-  RaftAppendLog raft_data = 3;
 }
 
-
+// RPC service on the replication follower node.
 service ReplicationFollower {
   rpc AppendLog(AppendLogRequest) returns (AppendLogResponse) {}
-
 }
