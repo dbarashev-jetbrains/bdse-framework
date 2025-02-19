@@ -90,7 +90,9 @@ class DemoDataTransferProtocol(
         grpcPool: GrpcPool<DataTransferServiceBlockingStub>
     ) {
         metadata.shardsList.forEach {
-            transferData(it, grpcPool)
+            if (it.leader.nodeAddress != selfAddress.toString()) {
+                transferData(it, grpcPool)
+            }
         }
     }
 
@@ -100,7 +102,7 @@ class DemoDataTransferProtocol(
     ) {
         val nodeAddess = shard.leader.nodeAddress.toNodeAddress()
         grpcPool.rpc(nodeAddess) {
-            println("Transferring data for shard=$shard from node=$nodeAddess")
+            LOG.info("START Transferring data for shard={} from node={}", shard, nodeAddess)
             val initResponse = initiateDataTransfer(initiateDataTransferRequest {
                 this.requesterAddress = selfAddress.toString()
             })
@@ -115,7 +117,7 @@ class DemoDataTransferProtocol(
                     this.transferId = -1
                 })
             }
-            println("Finished transferring data for shard=$shard from node=$nodeAddess")
+            LOG.info("FINISH Transferring data for shard={} from node={}", shard, nodeAddess)
         }
     }
 }
@@ -144,3 +146,5 @@ class VoidDataTransferProtocol : DataTransferProtocol {
 
     }
 }
+
+private val LOG = org.slf4j.LoggerFactory.getLogger("Node.MoveData")

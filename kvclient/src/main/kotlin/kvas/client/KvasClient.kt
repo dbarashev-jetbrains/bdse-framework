@@ -42,6 +42,7 @@ class KvasClient(
         synchronized(this) {
             metadata = newMetadata
         }
+        LOG.debug("New metadata={}", metadata)
     }
 
     private fun getShardForKey(key: String): ReplicatedShard {
@@ -112,7 +113,7 @@ class KvasClient(
                 when (resp.code) {
                     KvasProto.PutValueResponse.StatusCode.OK -> {}
                     KvasProto.PutValueResponse.StatusCode.REFRESH_SHARDS -> {
-                        LOG.info("PUT: got REFRESH_SHARDS response")
+                        LOG.info("PUT: got REFRESH_SHARDS response from {}", shard.nodeAddress)
                         refreshCount++
                         updateMetadata()
                         run()

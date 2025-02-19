@@ -14,6 +14,6 @@
         <appender-ref ref="async"/>
     </root>
 
-    <logger name="Client" level="INFO"/>
+    <logger name="Client" level="DEBUG"/>
     <logger name="io.grpc.netty.NettyClientHandler" level="INFO"/>
 </configuration>
