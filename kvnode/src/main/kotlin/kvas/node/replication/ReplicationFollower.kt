@@ -1,12 +1,11 @@
 package kvas.node.replication
 
+import com.google.protobuf.StringValue
 import kvas.node.storage.RowScan
 import kvas.node.storage.Storage
 import kvas.node.storage.StoredRow
-import kvas.proto.KvasReplicationProto
+import kvas.proto.*
 import kvas.proto.MetadataServiceGrpc.MetadataServiceBlockingStub
-import kvas.proto.ReplicationFollowerGrpcKt
-import kvas.proto.appendLogResponse
 import kvas.util.NodeAddress
 
 interface ReplicationFollower {
@@ -39,6 +38,20 @@ class NaiveReplicationFollower(private val storageDelegate: Storage) :
             it.dataRow.valuesMap.forEach { (k, v) -> storageDelegate.put(it.dataRow.key, k, v) }
         }
         return appendLogResponse { }
+    }
+
+    override suspend fun getValue(request: KvasProto.GetValueRequest): KvasProto.GetValueResponse {
+        val row = storageDelegate.getRow(request.rowKey)
+        val values = row?.valuesMap
+        return values?.getValue(request.columnName)?.let {
+            getValueResponse {
+                version = row.version
+                value = StringValue.of(it)
+                code = KvasProto.GetValueResponse.StatusCode.OK
+            }
+        } ?: getValueResponse {
+            code = KvasProto.GetValueResponse.StatusCode.OK
+        }
     }
 
     override val storage = NaiveFollowerStorage(storageDelegate)

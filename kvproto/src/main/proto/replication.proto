@@ -1,5 +1,6 @@
 syntax = "proto3";
 import "shared.proto";
+import "kvas.proto";
 option java_package = "kvas.proto";
 option java_outer_classname = "KvasReplicationProto";
 
@@ -49,4 +50,5 @@ message AppendLogResponse {
 // RPC service on the replication follower node.
 service ReplicationFollower {
   rpc AppendLog(AppendLogRequest) returns (AppendLogResponse) {}
+  rpc GetValue(GetValueRequest) returns (GetValueResponse) {}
 }
