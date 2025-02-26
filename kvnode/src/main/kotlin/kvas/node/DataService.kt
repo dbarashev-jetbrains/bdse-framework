@@ -212,8 +212,13 @@ internal class DataTransferServiceImpl(private val dataTransferProtocol: DataTra
 internal class MetadataListenerImpl(private val onChange: (ShardingChangeRequest) -> Unit) :
     MetadataListenerGrpcKt.MetadataListenerCoroutineImplBase() {
     override suspend fun shardingChange(request: ShardingChangeRequest): KvasProto.ShardingChangeResponse {
-        onChange(request)
-        return shardingChangeResponse { }
+        try {
+            onChange(request)
+            return shardingChangeResponse { }
+        } catch (ex: Throwable) {
+            LOG.error("Failed to handle sharding change notification", ex)
+            return shardingChangeResponse {}
+        }
     }
 }
 

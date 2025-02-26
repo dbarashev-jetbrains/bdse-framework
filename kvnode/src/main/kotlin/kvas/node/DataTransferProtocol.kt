@@ -76,8 +76,13 @@ class DemoDataTransferProtocol(
         }
 
     override fun startDataTransfer(request: KvasDataTransferProto.StartDataTransferRequest): Flow<DataRow> {
-        return storage.scan().use {
-            it.asFlow().map { DataRow.newBuilder().setKey(it.key).putAllValues(it.valuesMap).build() }
+        try {
+            return storage.scan().use {
+                it.asFlow().map { DataRow.newBuilder().setKey(it.key).putAllValues(it.valuesMap).build() }
+            }
+        } catch (ex: Throwable) {
+            LOG.error("Failed to scan storage", ex)
+            return emptyList<DataRow>().asFlow()
         }
     }
 
