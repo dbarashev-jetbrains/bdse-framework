@@ -25,7 +25,7 @@ data class Replica(val address: NodeAddress, var stub: ReplicationFollowerBlocki
  * A replication leader implements:
  * - storage interface that is actually responsible for the replication procedure in
  * its `put` method.
- * - metadata listener that it responsible for maintaining the list of replicas.
+ * - metadata listener that is responsible for maintaining the list of replicas.
  */
 interface ReplicationLeader {
     /**
@@ -41,14 +41,19 @@ interface ReplicationLeader {
     fun createMetadataListener(): OnMetadataChange
 }
 
+typealias ReplicationLeaderFactory = (NodeAddress, Storage, MetadataServiceBlockingStub) -> ReplicationLeader
+typealias ReplicationLeaderEntry = Pair<String, ReplicationLeaderFactory>
+
 /**
  * Holds all replication leader implementations, as a mapping of the implementation name to the function that creates
  * a ReplicationLeader instance.
  */
-object ReplicationLeaderFactory {
-    val VOID = "void" to ::createVoidReplicationLeader
-    val DEMO = "demo" to ::crateNaiveReplicationLeader
-    val ASYNC = "async" to ::createVoidReplicationLeader // TODO: plug your replication protocol implementation here
+object ReplicationLeaders {
+    val VOID: ReplicationLeaderEntry = "void" to ::createVoidReplicationLeader
+    val DEMO: ReplicationLeaderEntry = "demo" to ::DemoReplicationLeader
+    val ASYNC: ReplicationLeaderEntry = "async" to { _: NodeAddress, _: Storage, _:MetadataServiceBlockingStub ->
+        TODO("Task 4: implement asynchronous replication")
+    }
     val ALL = listOf(VOID, DEMO, ASYNC).toMap()
 }
 
@@ -67,11 +72,11 @@ fun createVoidReplicationLeader(selfAddress: NodeAddress, storage: Storage, meta
     VoidReplicationLeader(storage, metadataStub)
 
 /**
- * Naive replication storage writes the values locally and then sends out AppendLog messages to all replicas.
+ * Demo replication storage writes the values locally and then sends out AppendLog messages to all replicas.
  * There are no safety guarantees. This protocol works only if all nodes and network connections do not fail, and
  * there are no concurrent put requests.
  */
-class NaiveReplicationLeaderStorage(
+class DemoReplicationLeaderStorage(
     private val storageDelegate: Storage,
     private val selfAddress: NodeAddress,
     private val replicas: List<Replica>
@@ -113,7 +118,7 @@ class DemoReplicationLeader(
     private var clusterMetadata: ClusterMetadata = ClusterMetadata.getDefaultInstance()
 
     override fun createStorage(): Storage {
-        return NaiveReplicationLeaderStorage(storageDelegate, selfAddress, replicaList)
+        return DemoReplicationLeaderStorage(storageDelegate, selfAddress, replicaList)
     }
 
     override fun createMetadataListener(): OnMetadataChange = { clusterMetadata ->
@@ -131,8 +136,5 @@ class DemoReplicationLeader(
     }
 
 }
-
-fun crateNaiveReplicationLeader(selfAddress: NodeAddress, storage: Storage, metadataStub: MetadataServiceBlockingStub) =
-    DemoReplicationLeader(selfAddress, storage, metadataStub)
 
 private val LOG = LoggerFactory.getLogger("Replication.Leader")

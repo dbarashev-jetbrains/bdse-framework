@@ -15,15 +15,11 @@ import com.github.ajalt.clikt.parameters.types.int
 import io.grpc.ManagedChannelBuilder
 import io.grpc.ServerBuilder
 import kvas.node.raft.*
-import kvas.node.replication.LeaderlessReplication
-import kvas.node.replication.ReplicationFollowerFactory
-import kvas.node.replication.ReplicationLeaderFactory
 import kvas.node.storage.*
 import kvas.proto.KvasMetadataProto.NodeInfo
 import kvas.proto.KvasProto.ShardingChangeRequest
 import kvas.proto.MetadataListenerGrpc
 import kvas.proto.MetadataServiceGrpc
-import kvas.proto.MetadataServiceGrpc.MetadataServiceBlockingStub
 import kvas.setup.AllShardings
 import kvas.setup.NaiveSharding
 import kvas.setup.NotImplementedSharding
@@ -314,7 +310,6 @@ internal class Main : ChainedCliktCommand<KvasNodeBuilder>() {
             }
 
             is MemoryConfig -> {}
-            null -> error("No storage configured")
         }
 
         kvasNodeBuilder.sharding = AllShardings.ALL[shardingConfig] ?: NotImplementedSharding

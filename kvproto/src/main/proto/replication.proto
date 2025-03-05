@@ -50,5 +50,4 @@ message AppendLogResponse {
 // RPC service on the replication follower node.
 service ReplicationFollower {
   rpc AppendLog(AppendLogRequest) returns (AppendLogResponse) {}
-  rpc GetValue(GetValueRequest) returns (GetValueResponse) {}
 }

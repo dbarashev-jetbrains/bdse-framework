@@ -3,17 +3,16 @@ package kvas.node
 import io.grpc.ServerBuilder
 import kvas.node.replication.LeaderlessReplication
 import kvas.node.replication.LeaderlessReplicationDataServiceImpl
-import kvas.node.replication.ReplicationFollowerFactory
-import kvas.node.replication.ReplicationLeaderFactory
+import kvas.node.replication.ReplicationFollowers
+import kvas.node.replication.ReplicationLeaders
 import kvas.proto.KvasProto
 import kvas.setup.SingleShard
 
 internal fun KvasNodeBuilder.buildReplicationNode(grpcBuilder: ServerBuilder<*>) {
     if (this.replicationConfig.role == "leaderless") {
         val failingStorage = this.createFailingStorage(this.storage)
-        val leaderlessNode = LeaderlessReplication.ALL[this.replicationConfig.impl]!!.invoke(failingStorage)
-        this.storage = leaderlessNode.coordinatorStorage
-        val statisticsStorage = StatisticsStorage(this.storage)
+        val statisticsStorage = StatisticsStorage(failingStorage)
+        val leaderlessNode = LeaderlessReplication.ALL[this.replicationConfig.impl]!!.invoke(statisticsStorage, this.selfAddress)
 
         val dataService = LeaderlessReplicationDataServiceImpl(leaderlessNode)
         grpcBuilder.addService(dataService)
@@ -24,11 +23,11 @@ internal fun KvasNodeBuilder.buildReplicationNode(grpcBuilder: ServerBuilder<*>)
             metadataStub, selfAddress,
             if (metadataConfig.isMaster) KvasProto.RegisterNodeRequest.Role.LEADER_NODE else KvasProto.RegisterNodeRequest.Role.REPLICA_NODE,
             { 0 },
-            leaderlessNode::onRegister
+            { leaderlessNode.metadataListener.invoke(it.metadata) }
         )
     } else {
         if (this.replicationConfig.isFollower) {
-            val replicationFollower = ReplicationFollowerFactory.ALL[this.replicationConfig.impl]!!.invoke(
+            val replicationFollower = ReplicationFollowers.ALL[this.replicationConfig.impl]!!.invoke(
                 this.selfAddress,
                 storage,
                 metadataStub
@@ -36,7 +35,7 @@ internal fun KvasNodeBuilder.buildReplicationNode(grpcBuilder: ServerBuilder<*>)
             grpcBuilder.addService(replicationFollower.createGrpcService())
             this.storage = replicationFollower.storage
         } else {
-            val replicationLeader = ReplicationLeaderFactory.ALL[this.replicationConfig.impl]!!.invoke(
+            val replicationLeader = ReplicationLeaders.ALL[this.replicationConfig.impl]!!.invoke(
                 this.selfAddress,
                 storage,
                 metadataStub
