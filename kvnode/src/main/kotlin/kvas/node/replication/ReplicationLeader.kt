@@ -47,11 +47,9 @@ interface ReplicationLeader {
  */
 object ReplicationLeaderFactory {
     val VOID = "void" to ::createVoidReplicationLeader
-    val NAIVE = "naive" to ::crateNaiveReplicationLeader
+    val DEMO = "demo" to ::crateNaiveReplicationLeader
     val ASYNC = "async" to ::createVoidReplicationLeader // TODO: plug your replication protocol implementation here
-    val LEADERLESS =
-        "leaderless" to ::createVoidReplicationLeader // TODO: plug your replication protocol implementation here
-    val ALL = listOf(VOID, NAIVE, ASYNC, LEADERLESS).toMap()
+    val ALL = listOf(VOID, DEMO, ASYNC).toMap()
 }
 
 /**
@@ -106,7 +104,7 @@ class NaiveReplicationLeaderStorage(
  * metadata server, and uses a naive replication storage that sends out updates immediately as they come without any
  * safety guarantees.
  */
-class NaiveReplicationLeader(
+class DemoReplicationLeader(
     private val selfAddress: NodeAddress,
     private val storageDelegate: Storage,
     private val metadataStub: MetadataServiceBlockingStub
@@ -135,6 +133,6 @@ class NaiveReplicationLeader(
 }
 
 fun crateNaiveReplicationLeader(selfAddress: NodeAddress, storage: Storage, metadataStub: MetadataServiceBlockingStub) =
-    NaiveReplicationLeader(selfAddress, storage, metadataStub)
+    DemoReplicationLeader(selfAddress, storage, metadataStub)
 
 private val LOG = LoggerFactory.getLogger("Replication.Leader")

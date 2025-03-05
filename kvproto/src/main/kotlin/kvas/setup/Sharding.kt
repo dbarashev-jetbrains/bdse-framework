@@ -76,6 +76,15 @@ object NotImplementedSharding : Sharding {
     }
 }
 
+object SingleShard : Sharding {
+    override fun calculateShard(key: String, metadata: ClusterMetadata): ReplicatedShard {
+        return metadata.shardsList.first()
+    }
+
+    override fun createNewToken(shards: List<NodeInfo>): Int {
+        return 0
+    }
+}
 /**
  * Raft sharding is not really a sharding. It is rather a hack to let the client find out the Raft nodes from the
  * cluster metadata.

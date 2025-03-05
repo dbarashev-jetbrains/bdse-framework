@@ -1,14 +1,18 @@
 package kvas.node
 
 import com.google.protobuf.Int32Value
+import kotlinx.coroutines.runBlocking
 import kvas.proto.*
 import kvas.proto.KvasMetadataProto.ClusterMetadata
 import kvas.proto.KvasMetadataProto.NodeInfo
 import kvas.proto.KvasProto.*
+import kvas.proto.KvasProto.RegisterNodeRequest.Role
+import kvas.proto.MetadataServiceGrpc.MetadataServiceBlockingStub
 import kvas.setup.Sharding
 import kvas.util.NodeAddress
 import kvas.util.toNodeAddress
 import org.slf4j.LoggerFactory
+import kotlin.concurrent.timer
 
 typealias OnMetadataChange = (ClusterMetadata) -> Unit
 
@@ -207,4 +211,40 @@ class MetadataMaster(
     }
 }
 
+class RegisterTask(private val metadataStub: MetadataServiceBlockingStub,
+                   private val selfAddress: NodeAddress,
+                   private val role: Role,
+                   private val getShardToken: () -> Int?,
+                   private val onRegister: (RegisterNodeResponse) -> Unit) {
+    init {
+        // We will send registration requests to the metadata server once per 10 seconds.
+        timer(name = "Register node", period = 10000, initialDelay = 1000) {
+            registerItself()
+        }
+    }
+
+    private fun registerNode(): RegisterNodeResponse =
+        metadataStub.registerNode(registerNodeRequest {
+            this.nodeAddress = selfAddress.toString()
+            role = this@RegisterTask.role
+            getShardToken()?.let { this.shardToken = Int32Value.of(it) }
+        })
+
+
+    internal fun registerItself() {
+        val log = LoggerFactory.getLogger("Node.RegisterItself")
+        // Register at the metadata server, supplying the assigned token if it is available.
+        val response = registerNode()
+        when (response.code) {
+            KvasProto.RegisterNodeResponse.StatusCode.OK -> {
+                log.debug("Registered with token={}", response.shardToken)
+                onRegister(response)
+            }
+            else -> {
+                log.error("Can't register at the metadata master, received {}", response)
+                System.exit(1)
+            }
+        }
+    }
+}
 private val LOGGER = LoggerFactory.getLogger("MetadataService.Master")

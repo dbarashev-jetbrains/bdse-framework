@@ -35,21 +35,12 @@ open class KvasDataNode(
     private val storage: Storage,
     private val sharding: Sharding,
     initShardToken: () -> Int? = { null },
-    private val registerNode: (RegisterNodeRequest) -> RegisterNodeResponse,
     private val dataTransferProtocol: DataTransferProtocol,
 ) : DataServiceGrpcKt.DataServiceCoroutineImplBase() {
 
     private val dataTransferService = DataTransferServiceImpl(dataTransferProtocol)
-    private var shardToken: Int? = initShardToken()
+    internal var shardToken: Int? = initShardToken()
     private var clusterMetadata = clusterMetadata { }
-
-
-    init {
-        // We will send registration requests to the metadata server once per 10 seconds.
-        timer(name = "Register node", period = 10000, initialDelay = 1000) {
-            registerItself()
-        }
-    }
 
     /**
      * Retrieves the value associated with a specific key and column from the storage.
@@ -146,27 +137,9 @@ open class KvasDataNode(
         return this.shardToken?.let { it == requestToken } ?: false
     }
 
-    internal fun registerItself() {
-        val log = LoggerFactory.getLogger("Node.RegisterItself")
-        // Register at the metadata server, supplying the assigned token if it is available.
-        val response = registerNode(registerNodeRequest {
-            this.nodeAddress = selfAddress.toString()
-            this@KvasDataNode.shardToken?.let {
-                this.shardToken = Int32Value.of(it)
-            }
-        })
-        when (response.code) {
-            KvasProto.RegisterNodeResponse.StatusCode.OK -> {
-                log.debug("Registered with token={}", response.shardToken)
-                this.shardToken = response.shardToken
-                this.clusterMetadata = response.metadata
-            }
-
-            else -> {
-                log.error("Can't register at the metadata master, received {}", response)
-                System.exit(1)
-            }
-        }
+    internal fun onRegister(registerNodeResponse: RegisterNodeResponse) {
+        this.shardToken = registerNodeResponse.shardToken
+        this.clusterMetadata = registerNodeResponse.metadata
     }
 
     /**

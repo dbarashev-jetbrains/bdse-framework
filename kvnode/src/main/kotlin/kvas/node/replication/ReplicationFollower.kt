@@ -13,7 +13,7 @@ interface ReplicationFollower {
     val createGrpcService: () -> ReplicationFollowerGrpcKt.ReplicationFollowerCoroutineImplBase
 }
 
-class NaiveFollowerStorage(private val storageDelegate: Storage) : Storage {
+class DemoFollowerStorage(private val storageDelegate: Storage) : Storage {
     override fun put(rowKey: String, columnName: String, value: String) {
         error("I am read-only, bro")
     }
@@ -31,7 +31,7 @@ class NaiveFollowerStorage(private val storageDelegate: Storage) : Storage {
     }
 }
 
-class NaiveReplicationFollower(private val storageDelegate: Storage) :
+class DemoReplicationFollower(private val storageDelegate: Storage) :
     ReplicationFollowerGrpcKt.ReplicationFollowerCoroutineImplBase(), ReplicationFollower {
     override suspend fun appendLog(request: KvasReplicationProto.AppendLogRequest): KvasReplicationProto.AppendLogResponse {
         request.entriesList.forEach {
@@ -54,7 +54,7 @@ class NaiveReplicationFollower(private val storageDelegate: Storage) :
         }
     }
 
-    override val storage = NaiveFollowerStorage(storageDelegate)
+    override val storage = DemoFollowerStorage(storageDelegate)
     override val createGrpcService: () -> ReplicationFollowerGrpcKt.ReplicationFollowerCoroutineImplBase
         get() = { this }
 }
@@ -63,13 +63,13 @@ class NaiveReplicationFollower(private val storageDelegate: Storage) :
  * Holds all replication follower implementations.
  */
 object ReplicationFollowerFactory {
-    val NAIVE = "naive" to ::createNaiveReplicationFollower
+    val NAIVE = "demo" to ::createDemoReplicationFollower
     val ALL = listOf(NAIVE).toMap()
 }
 
-fun createNaiveReplicationFollower(
+fun createDemoReplicationFollower(
     selfAddress: NodeAddress,
     storage: Storage,
     metadataStub: MetadataServiceBlockingStub
-): NaiveReplicationFollower = NaiveReplicationFollower(storage)
+): DemoReplicationFollower = DemoReplicationFollower(storage)
 

@@ -5,10 +5,7 @@ import com.github.ajalt.clikt.command.main
 import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.output.MordantHelpFormatter
-import com.github.ajalt.clikt.parameters.groups.OptionGroup
-import com.github.ajalt.clikt.parameters.groups.groupChoice
-import com.github.ajalt.clikt.parameters.groups.mutuallyExclusiveOptions
-import com.github.ajalt.clikt.parameters.groups.required
+import com.github.ajalt.clikt.parameters.groups.*
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
@@ -18,11 +15,11 @@ import com.github.ajalt.clikt.parameters.types.int
 import io.grpc.ManagedChannelBuilder
 import io.grpc.ServerBuilder
 import kvas.node.raft.*
+import kvas.node.replication.LeaderlessReplication
 import kvas.node.replication.ReplicationFollowerFactory
 import kvas.node.replication.ReplicationLeaderFactory
 import kvas.node.storage.*
 import kvas.proto.KvasMetadataProto.NodeInfo
-import kvas.proto.KvasProto
 import kvas.proto.KvasProto.ShardingChangeRequest
 import kvas.proto.MetadataListenerGrpc
 import kvas.proto.MetadataServiceGrpc
@@ -33,6 +30,7 @@ import kvas.setup.NotImplementedSharding
 import kvas.setup.Sharding
 import kvas.util.NodeAddress
 import kvas.util.toNodeAddress
+import org.slf4j.LoggerFactory
 
 internal class ShardingChangeRecipient(private val address: NodeAddress) : AutoCloseable {
     val channel = ManagedChannelBuilder.forAddress(address.host, address.port).usePlaintext().build()
@@ -45,7 +43,7 @@ internal class ShardingChangeRecipient(private val address: NodeAddress) : AutoC
 /**
  * Builder class for configuring and initializing a KvasNode with storage, sharding, and metadata services.
  */
-class KvasNodeBuilder {
+internal class KvasNodeBuilder {
     var raftConfig: RaftConfig = RaftConfig(
         ElectionProtocols.DEMO.first,
         RaftReplicationLeaders.DEMO.first,
@@ -63,39 +61,29 @@ class KvasNodeBuilder {
     var storage: Storage = InMemoryStorage()
     var sharding: Sharding = NaiveSharding
     var dataTransferServiceImpl: String = DataTransferProtocols.DEMO.first
-    var replicationConfig: ReplicationConfig = ReplicationConfig(isFollower = false, impl = "void")
+    var replicationConfig: ReplicationConfig = ReplicationConfig(role = "leader", impl = "void")
     val metadataListeners = mutableListOf<OnMetadataChange>()
+    val clusterOutageState = ClusterOutageState()
+    val metadataStub = MetadataServiceGrpc.newBlockingStub(
+        ManagedChannelBuilder.forAddress(metadataConfig.masterAddress.host, metadataConfig.masterAddress.port)
+            .usePlaintext().build()
+    )
+
 
     private fun onShardingChange(nodes: List<NodeInfo>, request: ShardingChangeRequest) {
         nodes.forEach { node ->
             ShardingChangeRecipient(node.nodeAddress.toNodeAddress()).use { shardingChangeRecipient ->
-                shardingChangeRecipient.stub.shardingChange(request)
+                try {
+                    shardingChangeRecipient.stub.shardingChange(request)
+                } catch (ex: Exception) {
+                    LoggerFactory.getLogger("MetadataService.Master").error("Failed to send sharding change request to {}", node.nodeAddress, ex)
+                }
             }
         }
     }
 
-    private fun setupReplication(grpcBuilder: ServerBuilder<*>, metadataStub: MetadataServiceBlockingStub) {
-        if (this.replicationConfig.isFollower) {
-            val replicationFollower = ReplicationFollowerFactory.ALL[this.replicationConfig.impl]!!.invoke(
-                this.selfAddress,
-                storage,
-                metadataStub
-            )
-            grpcBuilder.addService(replicationFollower.createGrpcService())
-            this.storage = replicationFollower.storage
-        } else {
-            val replicationLeader = ReplicationLeaderFactory.ALL[this.replicationConfig.impl]!!.invoke(
-                this.selfAddress,
-                storage,
-                metadataStub
-            )
-            this.storage = replicationLeader.createStorage()
-            this.metadataListeners.add(replicationLeader.createMetadataListener())
-        }
-    }
-
     // If a failure emulator is configured, wraps the storage into a proxy that fails and recovers with the specified probabilities.
-    private fun createFailingStorage(delegate: Storage): Storage =
+    internal fun createFailingStorage(delegate: Storage): Storage =
         this.failureEmulator?.let { FailingStorage(it, delegate) } ?: delegate
 
     fun addServices(grpcBuilder: ServerBuilder<*>) {
@@ -107,35 +95,15 @@ class KvasNodeBuilder {
             return
         }
 
-        val metadataStub = MetadataServiceGrpc.newBlockingStub(
-            ManagedChannelBuilder.forAddress(metadataConfig.masterAddress.host, metadataConfig.masterAddress.port)
-                .usePlaintext().build()
-        )
-        setupReplication(grpcBuilder, metadataStub)
-        val statisticsStorage = StatisticsStorage(this.createFailingStorage(this.storage))
-        val dataService = KvasDataNode(
-            selfAddress = this.selfAddress, storage = statisticsStorage,
-            sharding = this.sharding,
-            dataTransferProtocol = DataTransferProtocols.ALL[this.dataTransferServiceImpl]!!.invoke(
-                sharding,
-                selfAddress,
-                storage
-            ),
-            registerNode = {
-                metadataStub.registerNode(
-                    it.toBuilder()
-                        .setRole(if (this.replicationConfig.isFollower) KvasProto.RegisterNodeRequest.Role.REPLICA_NODE else KvasProto.RegisterNodeRequest.Role.LEADER_NODE)
-                        .build()
-                )
-            },
-        )
-        grpcBuilder.addService(dataService)
-        metadataListeners.add(dataService::onShardingChange)
+        if (replicationConfig.isConfigured) {
+            this.buildReplicationNode(grpcBuilder)
+        } else {
+            this.buildShardingNode(grpcBuilder)
+        }
         grpcBuilder.addService(MetadataListenerImpl { shardingChangeRequest ->
             metadataListeners.forEach { it.invoke(shardingChangeRequest.metadata) }
         })
-        grpcBuilder.addService(dataService.createDataTransferService())
-        grpcBuilder.addService(StatisticsService(statisticsStorage))
+        grpcBuilder.addService(OutageEmulatorServiceImpl(selfAddress, clusterOutageState))
     }
 
     fun addRaftServices(grpcBuilder: ServerBuilder<*>) {
@@ -145,7 +113,7 @@ class KvasNodeBuilder {
                 .usePlaintext().build()
         )
         val statisticsStorage = StatisticsStorage(this.createFailingStorage(this.storage))
-        val raftNode = RaftNode(this.raftConfig, this.selfAddress, statisticsStorage, metadataStub)
+        val raftNode = RaftNode(this.raftConfig, this.selfAddress, statisticsStorage, metadataStub, this.clusterOutageState)
         metadataListeners.add(raftNode::onMetadataChange)
         grpcBuilder.addService(raftNode.getElectionService())
         grpcBuilder.addService(raftNode.getFollowerService())
@@ -204,7 +172,7 @@ class MetadataConfig(val isMaster: Boolean = true, val masterAddress: NodeAddres
  * With `--address` option it configures a node as a regular cluster node that can contact and register itself in the
  * master node.
  */
-class Metadata : ChainedCliktCommand<KvasNodeBuilder>() {
+internal class Metadata : ChainedCliktCommand<KvasNodeBuilder>() {
     val roleConfig: MetadataConfig by mutuallyExclusiveOptions(
         option("--master").flag().convert { MetadataConfig(isMaster = true, masterAddress = NodeAddress("", 0)) },
         option("--address").convert { MetadataConfig(isMaster = false, masterAddress = it.toNodeAddress()) },
@@ -233,7 +201,7 @@ class Metadata : ChainedCliktCommand<KvasNodeBuilder>() {
  * - `--mean-to-fail`: Specifies the mean number of requests served successfully before the node becomes faulty.
  * - `--mean-to-recover`: Specifies the mean number of failed requests before the node recovers and starts serving again.
  */
-class Failures : ChainedCliktCommand<KvasNodeBuilder>() {
+internal class Failures : ChainedCliktCommand<KvasNodeBuilder>() {
     val meanRequestsToFail by option(
         "--mean-to-fail",
         help = "The mean count of the served requests until this node becomes faulty"
@@ -253,17 +221,20 @@ class Failures : ChainedCliktCommand<KvasNodeBuilder>() {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Commands and flags related to replication
-class ReplicationConfig(val isFollower: Boolean, val impl: String) {
+internal class ReplicationConfig(val role: String, val impl: String) {
+    var isConfigured: Boolean = false
+    val isFollower: Boolean = role == "follower"
+
     override fun toString(): String {
         return """Replication: ${if (isFollower) "follower" else "leader"} using $impl implementation"""
     }
 }
 
-class Replication : ChainedCliktCommand<KvasNodeBuilder>() {
+internal class Replication : ChainedCliktCommand<KvasNodeBuilder>() {
     val role by option("--role").choice(
-        "leader", "follower"
+        "leader", "follower", "leaderless"
     ).default("leader")
-    val impl by option("--impl").choice("void", "naive", "async", "leaderless").default("naive")
+    val impl by option("--impl").choice("void", "async", "demo", "real").default("demo")
 
     init {
         context {
@@ -272,7 +243,8 @@ class Replication : ChainedCliktCommand<KvasNodeBuilder>() {
     }
 
     override fun run(value: KvasNodeBuilder): KvasNodeBuilder {
-        value.replicationConfig = ReplicationConfig(role == "follower", impl)
+        value.replicationConfig = ReplicationConfig(role, impl)
+        value.replicationConfig.isConfigured = true
         return value
     }
 }
@@ -286,7 +258,7 @@ class RaftConfig(val electionProtocol: String, val leader: String, val follower:
     }
 }
 
-class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
+internal class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
     val electionProtocol by option("--election-protocol").choice(*ElectionProtocols.ALL.keys.toTypedArray())
         .default(ElectionProtocols.DEMO.first)
     val follower by option("--follower").choice(*AppendLogProtocols.ALL.keys.toTypedArray())
@@ -310,14 +282,14 @@ class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Other options
-class Main : ChainedCliktCommand<KvasNodeBuilder>() {
+internal class Main : ChainedCliktCommand<KvasNodeBuilder>() {
     override val allowMultipleSubcommands: Boolean = true
     val grpcPort by option().int().default(9000)
     val selfAddress by option()
     val storageConfig by option("--storage").groupChoice(
         "dbms" to PostgresConfig(),
         "memory" to MemoryConfig(),
-    )
+    ).defaultByName("memory")
     val shardingConfig by option("--sharding").choice(
         *AllShardings.ALL.keys.toTypedArray()
     ).default(AllShardings.NAIVE.first)
