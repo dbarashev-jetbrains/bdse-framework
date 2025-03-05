@@ -3,6 +3,11 @@ package kvas.node.storage
 import com.github.michaelbull.result.Err
 import com.github.michaelbull.result.Ok
 import kotlinx.coroutines.runBlocking
+import kvas.proto.KvasOutageProto
+import kvas.proto.OutageEmulatorServiceGrpcKt
+import kvas.proto.setAvailableResponse
+import kvas.util.NodeAddress
+import kvas.util.toNodeAddress
 import kotlin.math.max
 import kotlin.random.Random
 
@@ -108,3 +113,24 @@ fun <T> whenAvailable(
             config.countDown()
         }
     }
+
+class ClusterOutageState {
+    var isAvailable = true
+    val unavailableNodes = mutableSetOf<NodeAddress>()
+}
+
+class OutageEmulatorServiceImpl(private val selfAddress: NodeAddress,
+                                private val outageState: ClusterOutageState): OutageEmulatorServiceGrpcKt.OutageEmulatorServiceCoroutineImplBase() {
+    override suspend fun setAvailable(request: KvasOutageProto.SetAvailableRequest): KvasOutageProto.SetAvailableResponse {
+        if (request.address.toNodeAddress() == selfAddress) {
+            outageState.isAvailable = request.isAvailable
+        } else {
+            if (request.isAvailable) {
+                outageState.unavailableNodes.remove(request.address.toNodeAddress())
+            } else {
+                outageState.unavailableNodes.add(request.address.toNodeAddress())
+            }
+        }
+        return setAvailableResponse {  }
+    }
+}

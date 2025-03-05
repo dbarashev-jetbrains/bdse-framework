@@ -2,6 +2,7 @@ package kvas.node.raft
 
 import io.grpc.ManagedChannelBuilder
 import kvas.node.RaftConfig
+import kvas.node.storage.ClusterOutageState
 import kvas.node.storage.Storage
 import kvas.proto.*
 import kvas.proto.ElectionServiceGrpc.ElectionServiceBlockingStub
@@ -13,7 +14,6 @@ import kvas.util.ObservableProperty
 import kvas.util.toNodeAddress
 import org.slf4j.LoggerFactory
 import java.util.*
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.timer
@@ -53,8 +53,6 @@ interface NodeState {
      * state of the Raft algorithm and can be observed to take the appropriate actions when the state changes.
      */
     val raftRole: ObservableProperty<RaftRole>
-
-    val isOnline: Boolean
 }
 
 /**
@@ -96,18 +94,18 @@ class RaftNode(
     raftConfig: RaftConfig,
     private val selfAddress: NodeAddress,
     private val delegateStorage: Storage,
-    private val metadataStub: MetadataServiceGrpc.MetadataServiceBlockingStub
+    private val metadataStub: MetadataServiceGrpc.MetadataServiceBlockingStub,
+    private val clusterOutageState: ClusterOutageState
 ) {
 
     private val log = LoggerFactory.getLogger("Raft.Role")
     private val logStorage = LogStorages.ALL[raftConfig.logImpl]!!.invoke()
     private val currentTerm = AtomicInteger(1)
-    private val isOnline = AtomicBoolean(true)
 
     private val raftNodes = mutableListOf<NodeAddress>()
-    private val nodeState = NodeStateImpl(selfAddress, currentTerm, logStorage, isOnline)
+    private val nodeState = NodeStateImpl(selfAddress, currentTerm, logStorage)
     private val clusterState = ClusterStateImpl(selfAddress, raftNodes)
-    private val electionServiceImpl = ElectionService(raftConfig, clusterState, nodeState)
+    private val electionServiceImpl = ElectionService(raftConfig, clusterState, nodeState, clusterOutageState)
     private val replicationFollower =
         AppendLogProtocols.ALL[raftConfig.follower]!!.invoke(clusterState, nodeState, delegateStorage)
     private val replicationLeader =
@@ -154,17 +152,17 @@ class RaftNode(
 
     fun getElectionService(): ElectionServiceCoroutineImplBase = electionServiceImpl
 
-    fun getFollowerService() = RaftReplicationFollowerImpl(replicationFollower, nodeState)
+    fun getFollowerService() = RaftReplicationFollowerImpl(replicationFollower, nodeState, clusterOutageState)
 
     fun getDataService(): DataServiceGrpcKt.DataServiceCoroutineImplBase {
         return replicationLeader.getDataService()
     }
 }
 
-class RaftReplicationFollowerImpl(private val appendLogProtocol: AppendLogProtocol, private val nodeState: NodeState) :
+class RaftReplicationFollowerImpl(private val appendLogProtocol: AppendLogProtocol, private val nodeState: NodeState, private val clusterOutageState: ClusterOutageState) :
     RaftReplicationServiceGrpcKt.RaftReplicationServiceCoroutineImplBase() {
     override suspend fun appendLog(request: RaftAppendLogRequest): RaftAppendLogResponse {
-        if (nodeState.isOnline) {
+        if (clusterOutageState.isAvailable) {
             return appendLogProtocol.appendLog(request)
         } else throw RuntimeException("Node is not online")
     }
@@ -177,7 +175,6 @@ class NodeStateImpl(
     override val address: NodeAddress,
     private val _currentTerm: AtomicInteger,
     override val logStorage: LogStorage,
-    private val _isOnline: AtomicBoolean
 ) : NodeState {
     override var currentTerm: Int
         get() = _currentTerm.get()
@@ -188,9 +185,6 @@ class NodeStateImpl(
         }
 
     override val raftRole = ObservableProperty(RaftRole.FOLLOWER)
-
-    override val isOnline: Boolean
-        get() = _isOnline.get()
 }
 
 /**
@@ -218,7 +212,12 @@ class ClusterStateImpl(selfAddress: NodeAddress, override val raftNodes: List<No
  * the election timeout expires and accepts the incoming election requests. It delegates the real work to the
  * ElectionProtocol implementation.
  */
-class ElectionService(raftConfig: RaftConfig, clusterState: ClusterState, nodeState: NodeState) :
+class ElectionService(
+    raftConfig: RaftConfig,
+    clusterState: ClusterState,
+    nodeState: NodeState,
+    clusterOutageState: ClusterOutageState
+) :
     ElectionServiceCoroutineImplBase() {
     private val electionPool = KvasPool<ElectionServiceBlockingStub>(nodeState.address) {
         ManagedChannelBuilder.forAddress(it.host, it.port).usePlaintext().build().let { channel ->

@@ -13,5 +13,4 @@ message SetAvailableResponse{}
 
 service OutageEmulatorService {
   rpc SetAvailable(SetAvailableRequest) returns (SetAvailableResponse) {};
-  rpc SetConnection(SetAvailableRequest) returns (SetAvailableResponse) {};
 }

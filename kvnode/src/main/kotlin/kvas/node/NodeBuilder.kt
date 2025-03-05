@@ -22,8 +22,7 @@ internal fun KvasNodeBuilder.buildReplicationNode(grpcBuilder: ServerBuilder<*>)
 
         RegisterTask(
             metadataStub, selfAddress,
-            if (replicationConfig.isFollower) KvasProto.RegisterNodeRequest.Role.REPLICA_NODE
-            else KvasProto.RegisterNodeRequest.Role.LEADER_NODE,
+            if (metadataConfig.isMaster) KvasProto.RegisterNodeRequest.Role.LEADER_NODE else KvasProto.RegisterNodeRequest.Role.REPLICA_NODE,
             { 0 },
             leaderlessNode::onRegister
         )
