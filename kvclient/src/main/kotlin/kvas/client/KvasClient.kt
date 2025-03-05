@@ -158,7 +158,9 @@ class KvasClient(
                 NodeStatistics(
                     address.toNodeAddress(),
                     statisticsResponse.readSuccessRate,
-                    statisticsResponse.writeSuccessRate
+                    statisticsResponse.writeSuccessRate,
+                    statisticsResponse.readTotal,
+                    statisticsResponse.writeTotal,
                 )
             )
             statisticsStub.resetStatistics(resetStatisticsRequest { })

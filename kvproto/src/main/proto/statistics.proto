@@ -8,6 +8,8 @@ message GetStatisticsRequest {
 message GetStatisticsResponse {
   double read_success_rate = 1;
   double write_success_rate = 2;
+  int32 read_total = 3;
+  int32 write_total = 4;
 }
 message ResetStatisticsRequest {
 }

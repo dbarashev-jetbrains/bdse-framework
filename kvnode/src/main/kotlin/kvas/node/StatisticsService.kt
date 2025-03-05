@@ -52,6 +52,8 @@ class StatisticsService(private val storage: StatisticsStorage) : StatisticsGrpc
         return getStatisticsResponse {
             readSuccessRate = storage.readSuccessRate
             writeSuccessRate = storage.writeSuccessRate
+            readTotal = storage.getTotal.get()
+            writeTotal = storage.putTotal.get()
         }
     }
 

@@ -97,4 +97,4 @@ fun LogEntryNumber.compareTo(other: LogEntryNumber) =
     }
 
 fun LogEntryNumber.toLogString() = "$termNumber:$ordinalNumber"
-data class NodeStatistics(val address: NodeAddress, val readSuccessRate: Double, val writeSuccessRate: Double)
+data class NodeStatistics(val address: NodeAddress, val readSuccessRate: Double, val writeSuccessRate: Double, val readTotal: Int, val writeTotal: Int)
