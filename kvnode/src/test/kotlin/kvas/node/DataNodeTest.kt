@@ -32,16 +32,13 @@ class DataNodeTest {
             selfAddress = NodeAddress("127.0.0.1", 9000),
             storage = storage,
             sharding = NaiveSharding,
-            registerNode = { _ ->
-                registerNodeResponse {
-                    code = RegisterNodeResponse.StatusCode.OK
-                    shardToken = 0
-                    metadata = createMetadata(shardCount = 1)
-                }
-            },
             dataTransferProtocol = VoidDataTransferProtocol()
         )
-        dataNode.registerItself()
+        dataNode.onRegister(registerNodeResponse {
+            code = RegisterNodeResponse.StatusCode.OK
+            shardToken = 0
+            metadata = createMetadata(shardCount = 1)
+        })
         runBlocking {
             dataNode.getValue(getValueRequest {
                 this.rowKey = "1"
@@ -78,16 +75,13 @@ class DataNodeTest {
             selfAddress = NodeAddress("127.0.0.1", 9000),
             storage = storage,
             sharding = NaiveSharding,
-            registerNode = { _ ->
-                registerNodeResponse {
-                    code = RegisterNodeResponse.StatusCode.OK
-                    shardToken = 0
-                    metadata = createMetadata(shardCount = 2)
-                }
-            },
             dataTransferProtocol = VoidDataTransferProtocol()
         )
-        dataNode.registerItself()
+        dataNode.onRegister(registerNodeResponse {
+            code = RegisterNodeResponse.StatusCode.OK
+            shardToken = 0
+            metadata = createMetadata(shardCount = 2)
+        })
         runBlocking {
             dataNode.putValue(putValueRequest {
                 this.rowKey = "1"
@@ -108,16 +102,13 @@ class DataNodeTest {
             selfAddress = NodeAddress("127.0.0.1", 9000),
             storage = storage,
             sharding = NaiveSharding,
-            registerNode = { _ ->
-                registerNodeResponse {
-                    code = RegisterNodeResponse.StatusCode.OK
-                    shardToken = 0
-                    metadata = createMetadata(shardCount = shardCount)
-                }
-            },
             dataTransferProtocol = VoidDataTransferProtocol()
         )
-        dataNode.registerItself()
+        dataNode.onRegister(registerNodeResponse {
+            code = RegisterNodeResponse.StatusCode.OK
+            shardToken = 0
+            metadata = createMetadata(shardCount = shardCount)
+        })
         runBlocking {
             dataNode.putValue(putValueRequest {
                 this.rowKey = "0"
@@ -132,7 +123,11 @@ class DataNodeTest {
 
         // Let the data node send "registerItself" request.
         shardCount = 2
-        dataNode.registerItself()
+        dataNode.onRegister(registerNodeResponse {
+            code = RegisterNodeResponse.StatusCode.OK
+            shardToken = 0
+            metadata = createMetadata(shardCount = shardCount)
+        })
 
         // Expect REFRESH_SHARDS response.
         runBlocking {
