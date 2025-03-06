@@ -131,10 +131,17 @@ class LoadTestCommand : CliktCommand(name = "loadtest") {
     val kvasClientFactory by requireObject<() -> KvasClient>()
     val keyCount by option().int().default(1)
     val clientCount by option().int().default(1)
+    val workload by option().choice("READONLY", "MIXED").default("MIXED")
+    val writeNode by option().choice("leader", "random").default("leader")
 
     override fun run() {
-        val loadTest = LoadTest(Workload.MIXED, keyCount, clientCount) {
-            KvasBackend(kvasClientFactory())
+        val writeNodeSelector = when (writeNode) {
+            "leader" -> LEADER_NODE_SELECTOR
+            "random" -> RANDOM_NODE_SELECTOR
+            else -> throw IllegalArgumentException("Unknown write node selector: $writeNode")
+        }
+        val loadTest = LoadTest(Workload.valueOf(workload), keyCount, clientCount) {
+            KvasBackend(kvasClientFactory(), writeNodeSelector)
         }
         loadTest.generateWorkload()
         kvasClientFactory().getNodeStatistics().forEach {

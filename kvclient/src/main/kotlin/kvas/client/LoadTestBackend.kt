@@ -2,6 +2,8 @@ package kvas.client
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kvas.proto.KvasMetadataProto.NodeInfo
+import kvas.proto.KvasMetadataProto.ReplicatedShard
 
 interface Backend : AutoCloseable {
     val stats: String
@@ -25,10 +27,10 @@ class DummyBackend : Backend {
     }
 }
 
-class KvasBackend(private val client: KvasClient) : Backend {
+class KvasBackend(private val client: KvasClient, private val writeNodeSelector: (ReplicatedShard)->NodeInfo) : Backend {
     override val stats: String = ""
     override fun put(key: String, value: String) {
-        client.put(key, value)
+        client.put(key, value, writeNodeSelector)
     }
 
     override fun get(key: String) = client.get(key)

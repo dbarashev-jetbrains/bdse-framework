@@ -83,7 +83,7 @@ class InMemoryRowScan(
     override fun hasNext(): Boolean = currentRow != null
 
     init {
-        if (!readLock.tryLock()) {
+        if (!readLock.tryLock(100, TimeUnit.MILLISECONDS)) {
             throw StorageException("Timeout while waiting for read lock")
         }
         if (iterator.hasNext()) {

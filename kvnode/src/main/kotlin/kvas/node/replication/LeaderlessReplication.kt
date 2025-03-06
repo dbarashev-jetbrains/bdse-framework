@@ -109,15 +109,26 @@ internal class DemoLeaderlessReplicationNode(private val storage: Storage, priva
     override fun putValue(req: KvasProto.PutValueRequest): PutValueResponse {
         storage.put(req.rowKey, req.columnName, req.value)
         if (!req.isAmbassador) {
-            replicaList.forEach { replica ->
-                grpcPool.rpc(replica) {
-                    putValue(putValueRequest {
-                        this.rowKey = req.rowKey
-                        this.columnName = req.columnName
-                        this.value = req.value
-                        this.isAmbassador = true
-                    })
+            var successCount = 0
+                synchronized(replicaList) {
+                    replicaList.forEach { replica ->
+                        try {
+                            grpcPool.rpc(replica) {
+                                putValue(putValueRequest {
+                                    this.rowKey = req.rowKey
+                                    this.columnName = req.columnName
+                                    this.value = req.value
+                                    this.isAmbassador = true
+                                })
+                            }
+                            successCount++
+                        } catch (ex: Exception) {
+                            LOG_PUT.warn("Failed to replicate to replica {}", replica)
+                        }
+                    }
                 }
+            if (successCount != replicaList.size) {
+                LOG_PUT.warn("Failed to replicate to some replicas. Success: {}/{}", successCount, replicaList.size)
             }
         }
         return putValueResponse {
@@ -128,10 +139,15 @@ internal class DemoLeaderlessReplicationNode(private val storage: Storage, priva
 
     fun onMetadataChange(clusterMetadata: KvasMetadataProto.ClusterMetadata) {
         this.clusterMetadata = clusterMetadata
-        replicaList.clear()
-        replicaList.addAll(clusterMetadata.shardsList.find { it.shardToken == 0 }?.let { shard ->
+        val newReplicas = clusterMetadata.shardsList.find { it.shardToken == 0 }?.let { shard ->
             shard.followersList.map { it.nodeAddress.toNodeAddress() } + listOf(shard.leader.nodeAddress.toNodeAddress())
-        }?.filter { it != selfAddress } ?: emptyList())
+        }?.filter { it != selfAddress } ?: emptyList()
+        if (newReplicas.toSet() != replicaList.toSet()) {
+            synchronized(replicaList) {
+                replicaList.clear()
+                replicaList.addAll(newReplicas)
+            }
+        }
     }
 }
 

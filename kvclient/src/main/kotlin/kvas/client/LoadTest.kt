@@ -99,6 +99,24 @@ class LoadTest(
                 """.trimIndent()
                     return@async BackendStats(keyCount = count, consistentReads = consistentReads, other = clientStats)
                 }
+                Workload.READONLY -> {
+                    var count = 0
+                    var consistentReads = 0
+                    val time = measureTime {
+                        payloadChannel.consumeEach { payload ->
+                            try {
+                                count++
+                                val readValue = backend.get(payload.rowKey)
+                            } catch (ex: Exception) {
+                                LOG.error("GET: failed to get key ${payload.rowKey} from backend $backend", ex)
+                            }
+                        }
+                    }
+                    val clientStats = """
+                    Client #$clientNum processed $count read cycles in $time (${count / time.inSeconds()} RPS)
+                """.trimIndent()
+                    return@async BackendStats(keyCount = count, consistentReads = count, other = clientStats)
+                }
 
                 else -> error("Unsupported workload: $workload")
             }

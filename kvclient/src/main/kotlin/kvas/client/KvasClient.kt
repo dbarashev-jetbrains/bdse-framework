@@ -84,15 +84,15 @@ class KvasClient(
         }
     }
 
-    fun put(key: String, value: String) {
-        PutTask(key, value).run()
+    fun put(key: String, value: String, nodeSelector: (ReplicatedShard)->NodeInfo = LEADER_NODE_SELECTOR) {
+        PutTask(key, value, nodeSelector).run()
     }
 
     /**
      * PUT requests may be redirected, and we need to keep additional state to detect possible redirect loops.
      * That's why there is a separate object for executing a PUT request.
      */
-    inner class PutTask(private val key: String, private val value: String) {
+    inner class PutTask(private val key: String, private val value: String, private val nodeSelector: (ReplicatedShard) -> NodeInfo) {
         private var refreshCount = 0
         private val redirectChain = mutableSetOf<String>()
 
@@ -100,7 +100,10 @@ class KvasClient(
             if (refreshCount == 5) {
                 error("Failed to get a value by key $key in 5 attempts. Giving up.")
             }
-            getShardForKey(key).let { put(it.leader, getNodeStub(it.leader.nodeAddress), key, value) }
+            getShardForKey(key).let {
+                val writeNode = nodeSelector(it)
+                put(writeNode, getNodeStub(writeNode.nodeAddress), key, value)
+            }
         }
 
         private fun put(shard: NodeInfo, node: DataServiceGrpc.DataServiceBlockingStub, key: String, value: String) {
@@ -176,6 +179,8 @@ class KvasClient(
     }
 }
 
+val LEADER_NODE_SELECTOR: (ReplicatedShard)->NodeInfo = { it.leader }
+val RANDOM_NODE_SELECTOR: (ReplicatedShard)->NodeInfo = { it.randomGetNode() }
 private fun ReplicatedShard.randomGetNode() = (listOf(this.leader) + this.followersList).random()
 
 private val LOG = LoggerFactory.getLogger("Client")
