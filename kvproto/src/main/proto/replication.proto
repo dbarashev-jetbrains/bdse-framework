@@ -39,12 +39,15 @@ message AppendLogResponse {
   enum Status {
     // The appended log suffix is okay, follower will commit it when instructed to do so.
     OK = 0;
-    // The follower rejects this response because it doesn't acknowledge the sender as an elected and legitimate leader.
+    // The follower rejects this request because it can't apply the log entries to its local storage.
     REJECT = 2;
   }
 
   // Response status.
   Status status = 2;
+
+  // The last log entry that is available on the follower.
+  LogEntry last_entry = 3;
 }
 
 // RPC service on the replication follower node.
