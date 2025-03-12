@@ -14,7 +14,7 @@ interface AppendLogProtocol {
     fun appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse
 }
 
-object AppendLogProtocols {
+object RaftFollowers {
     val DEMO = "demo" to ::DemoReplicationFollower
     val REAL = "real" to { _: ClusterState, _: NodeState, _: Storage ->
         TODO("Task X: Implement your own RAFT replication follower")
@@ -38,7 +38,7 @@ class DemoReplicationFollower(
     fun _appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse {
         // Are we sure that the request comes from the most actual leader?
 
-        // Otherwise the request looks legitimate and we start adding the entry to the local log and updating the
+        // Let's pretend we are sure, and start adding the entry to the local log and updating the
         // cluster information.
         if (request.senderAddress != clusterState.leaderAddress.toString()) {
             log.debug("AppendLog from {}", request.senderAddress)
@@ -58,6 +58,8 @@ class DemoReplicationFollower(
             nodeState.raftRole.value = RaftRole.FOLLOWER
         }
 
+        // Some requests come without any log entry, they are just heartbeats. If there is an entry, let's
+        // see if we need to append it to the log.
         if (request.hasEntry()) {
             // The entry that is being replicated may or may not be in the local log storage.
             // The usual case when it is already in the storage is when this code is running on the leader:
@@ -103,6 +105,8 @@ class DemoReplicationFollower(
             }
         }
 
+        // Even if there is no entry being replicated, we may need to commit some of the log entries to match the last
+        // committed entry in the request.
         val lastCommittedEntryNum = nodeState.logStorage.lastCommittedEntryNum.value
         if (lastCommittedEntryNum.compareTo(request.lastCommittedEntry) < 0) {
             log.debug("Last committed entry on this node: {}", lastCommittedEntryNum.toLogString())
@@ -113,8 +117,7 @@ class DemoReplicationFollower(
             )
             // If the leader's last committed entry is > than ours, we start committing our log until we
             // reach the last committed on the server or the end of the log.
-            val lastCommitted = commitRange(lastCommittedEntryNum, request.lastCommittedEntry)
-            nodeState.logStorage.lastCommittedEntryNum.value = lastCommitted
+            val lastCommitted = nodeState.logStorage.commitRange(storage, lastCommittedEntryNum, request.lastCommittedEntry)
             if (lastCommitted != request.lastCommittedEntry) {
                 // It is possible that the log on this node is not yet complete, because the replication is lagging.
                 // A missing entry is expected to replicate soon.
@@ -133,44 +136,6 @@ class DemoReplicationFollower(
             termNumber = nodeState.currentTerm
         }
     }
-
-
-    private fun commitRange(firstEntry: LogEntryNumber, lastEntry: LogEntryNumber): LogEntryNumber {
-        val log = LoggerFactory.getLogger("Raft.Follower.CommitLog")
-        var lastCommitted = firstEntry
-        val commitView = nodeState.logStorage.createIterator()
-
-        commitView.positionAt(firstEntry)
-        commitView.forward()
-        while (true) {
-            val isBreak = commitView.get()?.let {
-                if (it.entryNumber.compareTo(lastEntry) > 0) {
-                    log.debug(
-                        "Entry in the local log={} is > last committed on the leader={}, breaking",
-                        it.entryNumber.toLogString(),
-                        lastEntry.toLogString()
-                    )
-                    true
-                } else {
-                    log.debug("committing entry {}", it)
-                    runBlocking {
-                        it.dataRow.valuesMap.forEach({ column, value ->
-                            storage.put(it.dataRow.key, column, value)
-                        })
-                    }
-                    lastCommitted = it.entryNumber
-                    commitView.forward()
-                    false
-                }
-            } ?: true
-            if (isBreak) {
-                break
-            }
-        }
-        log.info("Committed the log until entry {}", lastCommitted.toLogString())
-        return lastCommitted
-    }
-
 }
 
 

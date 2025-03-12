@@ -12,7 +12,7 @@ interface RaftReplicationLeader {
     fun onMetadataChange()
 }
 
-object RaftReplicationLeaders {
+object RaftLeaders {
     val DEMO = "demo" to ::DemoReplicationLeader
     val REAL = "real" to { _: ClusterState, _: NodeState, _: Storage, _: LogStorage ->
         TODO("Task X: Implement your own RAFT replication leader")

@@ -83,7 +83,7 @@ class DemoElectionProtocol(
             LOG.debug("The leader is not dead")
             return
         }
-        LOG.debug("This node is now a CANDIDATE")
+        LOG.debug("Trying to become a CANDIDATE...")
         nodeState.raftRole.value = RaftRole.CANDIDATE
         val electionRequest = leaderElectionRequest {
             nodeAddress = nodeState.address.toString()

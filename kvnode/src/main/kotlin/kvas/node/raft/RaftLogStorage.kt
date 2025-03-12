@@ -1,11 +1,14 @@
 package kvas.node.raft
 
+import kotlinx.coroutines.runBlocking
+import kvas.node.storage.Storage
 import kvas.node.storage.globalPostgresConfig
 import kvas.proto.KvasReplicationProto.LogEntry
 import kvas.proto.KvasReplicationProto.LogEntryNumber
 import kvas.util.ObservableProperty
 import kvas.util.compareTo
 import kvas.util.toLogString
+import org.slf4j.LoggerFactory
 
 /**
  * Interface representing a storage mechanism for log entries in a Raft node,
@@ -25,7 +28,7 @@ interface LogStorage {
     fun add(entry: LogEntry)
 
     /**
-     * Creates a view over the log.
+     * Creates an iterable view over the log.
      */
     fun createIterator(): LogIterator
 
@@ -136,3 +139,39 @@ internal class InMemoryLogIterator(private val entries: List<LogEntry>, private 
     }
 }
 
+fun LogStorage.commitRange(storage: Storage, firstEntry: LogEntryNumber, lastEntry: LogEntryNumber): LogEntryNumber {
+    val log = LoggerFactory.getLogger("Raft.Follower.CommitLog")
+    var lastCommitted = firstEntry
+    val commitView = this.createIterator()
+
+    commitView.positionAt(firstEntry)
+    commitView.forward()
+    while (true) {
+        val isBreak = commitView.get()?.let {
+            if (it.entryNumber.compareTo(lastEntry) > 0) {
+                log.debug(
+                    "Entry in the local log={} is > last committed on the leader={}, breaking",
+                    it.entryNumber.toLogString(),
+                    lastEntry.toLogString()
+                )
+                true
+            } else {
+                log.debug("committing entry {}", it)
+                runBlocking {
+                    it.dataRow.valuesMap.forEach({ column, value ->
+                        storage.put(it.dataRow.key, column, value)
+                    })
+                }
+                lastCommitted = it.entryNumber
+                commitView.forward()
+                false
+            }
+        } ?: true
+        if (isBreak) {
+            break
+        }
+    }
+    log.info("Committed the log until entry {}", lastCommitted.toLogString())
+    lastCommittedEntryNum.value = lastCommitted
+    return lastCommitted
+}

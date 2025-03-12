@@ -4,7 +4,7 @@ import kvas.node.PostgresConfig
 import kvas.proto.KvasReplicationProto
 import kvas.util.ObservableProperty
 
-class DatabaseLogStorage(config: PostgresConfig) : LogStorage {
+class DatabaseLogStorage(private val config: PostgresConfig) : LogStorage {
     override val lastCommittedEntryNum: ObservableProperty<KvasReplicationProto.LogEntryNumber>
         get() = TODO("Not yet implemented")
 

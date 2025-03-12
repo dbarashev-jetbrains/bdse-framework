@@ -1,6 +1,8 @@
 package kvas.node.raft
 
 import io.grpc.ManagedChannelBuilder
+import io.grpc.Status
+import io.grpc.StatusRuntimeException
 import kvas.node.RaftConfig
 import kvas.node.storage.ClusterOutageState
 import kvas.node.storage.Storage
@@ -107,9 +109,9 @@ class RaftNode(
     private val clusterState = ClusterStateImpl(selfAddress, raftNodes)
     private val electionServiceImpl = ElectionService(raftConfig, clusterState, nodeState, clusterOutageState)
     private val replicationFollower =
-        AppendLogProtocols.ALL[raftConfig.follower]!!.invoke(clusterState, nodeState, delegateStorage)
+        RaftFollowers.ALL[raftConfig.follower]!!.invoke(clusterState, nodeState, delegateStorage)
     private val replicationLeader =
-        RaftReplicationLeaders.ALL[raftConfig.leader]!!.invoke(clusterState, nodeState, delegateStorage, logStorage)
+        RaftLeaders.ALL[raftConfig.leader]!!.invoke(clusterState, nodeState, delegateStorage, logStorage)
 
     init {
         nodeState.raftRole.subscribe { oldRole, newRole ->
@@ -117,6 +119,7 @@ class RaftNode(
                 RaftRole.LEADER -> {
                     when (oldRole) {
                         RaftRole.FOLLOWER -> error("You can't transition FOLLOWER->LEADER")
+                        RaftRole.CANDIDATE -> log.info("!!! Node {} transitioned to LEADER role.", selfAddress)
                         else -> {}
                     }
                 }
@@ -136,12 +139,15 @@ class RaftNode(
             true
         }
         timer(name = "Register node", period = 10000, initialDelay = 1000) {
-            metadataStub.registerNode(registerNodeRequest {
-                role = KvasProto.RegisterNodeRequest.Role.RAFT_NODE
-                nodeAddress = selfAddress.toString()
-            })
+            try {
+                metadataStub.registerNode(registerNodeRequest {
+                    role = KvasProto.RegisterNodeRequest.Role.RAFT_NODE
+                    nodeAddress = selfAddress.toString()
+                })
+            } catch (ex: Throwable) {
+                log.error("Failed to register at the metadata service", ex)
+            }
         }
-
     }
 
     fun onMetadataChange(clusterMetadata: KvasMetadataProto.ClusterMetadata) {
@@ -152,15 +158,21 @@ class RaftNode(
 
     fun getElectionService(): ElectionServiceCoroutineImplBase = electionServiceImpl
 
-    fun getFollowerService() = RaftReplicationFollowerImpl(replicationFollower, nodeState, clusterOutageState)
+    internal fun getFollowerService() = RaftReplicationFollowerImpl(replicationFollower, nodeState, clusterOutageState)
 
     fun getDataService(): DataServiceGrpcKt.DataServiceCoroutineImplBase {
         return replicationLeader.getDataService()
     }
 }
 
-class RaftReplicationFollowerImpl(private val appendLogProtocol: AppendLogProtocol, private val nodeState: NodeState, private val clusterOutageState: ClusterOutageState) :
-    RaftReplicationServiceGrpcKt.RaftReplicationServiceCoroutineImplBase() {
+/**
+ * Implementation of the follower gRPC service.
+ */
+internal class RaftReplicationFollowerImpl(
+    private val appendLogProtocol: AppendLogProtocol,
+    private val nodeState: NodeState,
+    private val clusterOutageState: ClusterOutageState) : RaftReplicationServiceGrpcKt.RaftReplicationServiceCoroutineImplBase() {
+
     override suspend fun appendLog(request: RaftAppendLogRequest): RaftAppendLogResponse {
         if (clusterOutageState.isAvailable) {
             return appendLogProtocol.appendLog(request)
@@ -208,7 +220,7 @@ class ClusterStateImpl(selfAddress: NodeAddress, override val raftNodes: List<No
 }
 
 /**
- * Implementation of gRPC service that handles leader elections in Raft protocol. It initiates leader election when
+ * Implementation of a gRPC service that handles leader elections in Raft protocol. It initiates leader election when
  * the election timeout expires and accepts the incoming election requests. It delegates the real work to the
  * ElectionProtocol implementation.
  */
@@ -216,9 +228,9 @@ class ElectionService(
     raftConfig: RaftConfig,
     clusterState: ClusterState,
     nodeState: NodeState,
-    clusterOutageState: ClusterOutageState
-) :
-    ElectionServiceCoroutineImplBase() {
+    private val clusterOutageState: ClusterOutageState
+) : ElectionServiceCoroutineImplBase() {
+
     private val electionPool = KvasPool<ElectionServiceBlockingStub>(nodeState.address) {
         ManagedChannelBuilder.forAddress(it.host, it.port).usePlaintext().build().let { channel ->
             ElectionServiceGrpc.newBlockingStub(channel)
@@ -227,12 +239,18 @@ class ElectionService(
 
     // Timer that initiates new leader elections.
     private val electionTimeout: Timer
+    // The election protocol implementation.
     private val electionProtocol: ElectionProtocol
 
-    private fun sendElectionRequest(
-        address: NodeAddress,
-        req: LeaderElectionRequest
-    ): LeaderElectionResponse = electionPool.rpc(address) { leaderElection(req) }
+    /**
+     * Sends a gRPC LeaderElection request unless the destination node is configured as unavailable from this node.
+     */
+    private fun sendElectionRequest(address: NodeAddress, req: LeaderElectionRequest): LeaderElectionResponse {
+        if (clusterOutageState.unavailableNodes.contains(address)) {
+           throw StatusRuntimeException(Status.UNAVAILABLE)
+        }
+        return electionPool.rpc(address) { leaderElection(req) }
+    }
 
     init {
         electionProtocol = ElectionProtocols.ALL.getValue(raftConfig.electionProtocol)
@@ -241,15 +259,28 @@ class ElectionService(
             "Election Timeout",
             initialDelay = (HEARTBEAT_PERIOD * 1.5).toLong(),
             period = Random.nextLong(HEARTBEAT_PERIOD, HEARTBEAT_PERIOD * 2).also {
-                LoggerFactory.getLogger("Raft.Election").info("Election timeout={}", it)
+                LOG_ELECTION.info("Election timeout={}", it)
             }) {
             electionProtocol.tryBecomeLeader()
         }
     }
 
+    /**
+     * We will serve the leader election request unless this node is configured as unavailable from any node.
+     */
     override suspend fun leaderElection(request: LeaderElectionRequest): LeaderElectionResponse {
-        return electionProtocol.processElectionRequest(request)
+        if (clusterOutageState.isAvailable) {
+            return try {
+                electionProtocol.processElectionRequest(request)
+            } catch (ex: Throwable) {
+                LOG_ELECTION.error("Failed to process election request", ex)
+                throw ex
+            }
+        } else {
+            throw StatusRuntimeException(Status.UNAVAILABLE)
+        }
     }
 }
 
+internal val LOG_ELECTION = LoggerFactory.getLogger("Raft.Election")
 internal const val HEARTBEAT_PERIOD = 2000L
