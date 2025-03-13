@@ -12,9 +12,12 @@ interface RaftReplicationLeader {
     fun onMetadataChange()
 }
 
+typealias ReplicationLeaderFactory = (ClusterState, NodeState, Storage, LogStorage) -> RaftReplicationLeader
+typealias ReplicationLeaderProvider = Pair<String, ReplicationLeaderFactory>
+
 object RaftLeaders {
-    val DEMO = "demo" to ::DemoReplicationLeader
-    val REAL = "real" to { _: ClusterState, _: NodeState, _: Storage, _: LogStorage ->
+    val DEMO: ReplicationLeaderProvider = "demo" to ::DemoReplicationLeader
+    val REAL: ReplicationLeaderProvider = "real" to { _: ClusterState, _: NodeState, _: Storage, _: LogStorage ->
         TODO("Task X: Implement your own RAFT replication leader")
     }
     val ALL = listOf(DEMO, REAL).toMap()

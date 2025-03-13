@@ -348,7 +348,7 @@ class RaftLogSender(
                                     currentEntry.entryNumber.toLogString(),
                                     replicaAddress
                                 )
-                                logView.forward()
+                                logView.advance()
                             }
                         }
                         Status.REJECT -> {

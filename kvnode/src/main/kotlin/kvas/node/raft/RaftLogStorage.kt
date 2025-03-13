@@ -43,10 +43,24 @@ interface LogStorage {
  * entries and provides access to the entry at the specified position.
  */
 interface LogIterator {
+    /**
+     * Returns the last entry that is committed on this node.
+     */
     val lastCommittedEntry: LogEntryNumber
 
+    /**
+     * Returns the log entry where iterator is positioned at.
+     */
     fun get(): LogEntry?
-    fun forward(): Boolean
+
+    /**
+     * Advances the iterator forwards.
+     */
+    fun advance(): Boolean
+
+    /**
+     * Positions the iterator at the given entry.
+     */
     fun positionAt(entry: LogEntryNumber)
 }
 
@@ -116,7 +130,7 @@ internal class InMemoryLogIterator(private val entries: List<LogEntry>, private 
         if (pos >= 0 && entries.size > pos) entries[pos] else null
     }
 
-    override fun forward(): Boolean {
+    override fun advance(): Boolean {
         synchronized(entries) {
             if (pos < entries.size) pos++
             return pos < entries.size
@@ -145,7 +159,7 @@ fun LogStorage.commitRange(storage: Storage, firstEntry: LogEntryNumber, lastEnt
     val commitView = this.createIterator()
 
     commitView.positionAt(firstEntry)
-    commitView.forward()
+    commitView.advance()
     while (true) {
         val isBreak = commitView.get()?.let {
             if (it.entryNumber.compareTo(lastEntry) > 0) {
@@ -163,7 +177,7 @@ fun LogStorage.commitRange(storage: Storage, firstEntry: LogEntryNumber, lastEnt
                     })
                 }
                 lastCommitted = it.entryNumber
-                commitView.forward()
+                commitView.advance()
                 false
             }
         } ?: true

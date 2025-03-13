@@ -261,14 +261,14 @@ class RaftConfig(val electionProtocol: String, val leader: String, val follower:
 }
 
 internal class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
-    val electionProtocol by option("--election-protocol").choice(*ElectionProtocols.ALL.keys.toTypedArray())
+    val electionProtocol by option("--election").choice(*ElectionProtocols.ALL.keys.toTypedArray())
         .default(ElectionProtocols.DEMO.first)
     val follower by option("--follower").choice(*RaftFollowers.ALL.keys.toTypedArray())
         .default(RaftFollowers.DEMO.first)
     val leader by option("--leader").choice(*RaftLeaders.ALL.keys.toTypedArray())
         .default(RaftLeaders.DEMO.first)
     val logImpl by option("--log").choice(*LogStorages.ALL.keys.toTypedArray()).default(LogStorages.IN_MEMORY.first)
-    val allImpls by option("--all").choice("demo", "real", "**").default("**")
+    val allImpls by option("--protocols").choice("demo", "real", "**").default("**")
 
     init {
         context {
@@ -280,7 +280,7 @@ internal class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
         value.raftConfig = if (allImpls == "**") {
             RaftConfig(electionProtocol, leader, follower, logImpl)
         } else {
-            RaftConfig(allImpls, allImpls, allImpls, allImpls)
+            RaftConfig(allImpls, allImpls, allImpls, logImpl)
         }
         value.raftConfig.isConfigured = true
         return value

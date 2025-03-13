@@ -9,14 +9,16 @@ import kvas.proto.leaderElectionResponse
 import kvas.util.NodeAddress
 import org.slf4j.LoggerFactory
 
+typealias LeaderElectionGrpc = (NodeAddress, LeaderElectionRequest) -> LeaderElectionResponse
+typealias ElectionProtocolFactory = (ClusterState, NodeState, LeaderElectionGrpc) -> ElectionProtocol
+typealias ElectionProtocolProvider = Pair<String, ElectionProtocolFactory>
 /**
  * All available implementations of the ElectionProtocol extension.
  */
 object ElectionProtocols {
-    val DEMO = "demo" to ::DemoElectionProtocol
-    val REAL =
-        "real" to { _: ClusterState, _: NodeState, _: (NodeAddress, LeaderElectionRequest) -> LeaderElectionResponse
-            ->
+    val DEMO: ElectionProtocolProvider = "demo" to ::DemoElectionProtocol
+    val REAL: ElectionProtocolProvider =
+        "real" to { _: ClusterState, _: NodeState, _: LeaderElectionGrpc ->
             TODO("Task X: implement your own RAFT election protocol")
         }
 
@@ -68,7 +70,7 @@ interface ElectionProtocol {
 class DemoElectionProtocol(
     private val clusterState: ClusterState,
     private val nodeState: NodeState,
-    private val leaderElectionRpc: (NodeAddress, LeaderElectionRequest) -> LeaderElectionResponse
+    private val leaderElectionRpc: LeaderElectionGrpc
 ) : ElectionProtocol {
 
     val quorumSize get() = clusterState.quorumSize

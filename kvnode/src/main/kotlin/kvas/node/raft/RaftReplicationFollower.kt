@@ -14,9 +14,12 @@ interface AppendLogProtocol {
     fun appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse
 }
 
+typealias AppendLogProtocolFactory = (ClusterState, NodeState, Storage) -> AppendLogProtocol
+typealias AppendLogProtocolProvider = Pair<String, AppendLogProtocolFactory>
+
 object RaftFollowers {
-    val DEMO = "demo" to ::DemoReplicationFollower
-    val REAL = "real" to { _: ClusterState, _: NodeState, _: Storage ->
+    val DEMO: AppendLogProtocolProvider = "demo" to ::DemoReplicationFollower
+    val REAL: AppendLogProtocolProvider = "real" to { _: ClusterState, _: NodeState, _: Storage ->
         TODO("Task X: Implement your own RAFT replication follower")
     }
     val ALL = listOf(DEMO, REAL).toMap()
