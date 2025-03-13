@@ -42,8 +42,8 @@ internal class ShardingChangeRecipient(private val address: NodeAddress) : AutoC
 internal class KvasNodeBuilder {
     var raftConfig: RaftConfig = RaftConfig(
         ElectionProtocols.DEMO.first,
-        RaftReplicationLeaders.DEMO.first,
-        AppendLogProtocols.DEMO.first,
+        RaftLeaders.DEMO.first,
+        RaftFollowers.DEMO.first,
         LogStorages.IN_MEMORY.first,
     )
     var failureEmulator: OutageEmulator? = null
@@ -54,13 +54,19 @@ internal class KvasNodeBuilder {
         }
     var selfAddress: NodeAddress = NodeAddress("localhost", 9000)
     var metadataConfig: MetadataConfig = MetadataConfig(isMaster = true, masterAddress = selfAddress)
+        set(value) {
+            field = value
+            metadataStub = MetadataServiceGrpc.newBlockingStub(
+                ManagedChannelBuilder.forAddress(metadataConfig.masterAddress.host, metadataConfig.masterAddress.port)
+                    .usePlaintext().build())
+        }
     var storage: Storage = InMemoryStorage()
     var sharding: Sharding = NaiveSharding
     var dataTransferServiceImpl: String = DataTransferProtocols.DEMO.first
     var replicationConfig: ReplicationConfig = ReplicationConfig(role = "leader", impl = "void")
     val metadataListeners = mutableListOf<OnMetadataChange>()
     val clusterOutageState = ClusterOutageState()
-    val metadataStub = MetadataServiceGrpc.newBlockingStub(
+    var metadataStub = MetadataServiceGrpc.newBlockingStub(
         ManagedChannelBuilder.forAddress(metadataConfig.masterAddress.host, metadataConfig.masterAddress.port)
             .usePlaintext().build()
     )
@@ -257,10 +263,10 @@ class RaftConfig(val electionProtocol: String, val leader: String, val follower:
 internal class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
     val electionProtocol by option("--election-protocol").choice(*ElectionProtocols.ALL.keys.toTypedArray())
         .default(ElectionProtocols.DEMO.first)
-    val follower by option("--follower").choice(*AppendLogProtocols.ALL.keys.toTypedArray())
-        .default(AppendLogProtocols.DEMO.first)
-    val leader by option("--leader").choice(*RaftReplicationLeaders.ALL.keys.toTypedArray())
-        .default(RaftReplicationLeaders.DEMO.first)
+    val follower by option("--follower").choice(*RaftFollowers.ALL.keys.toTypedArray())
+        .default(RaftFollowers.DEMO.first)
+    val leader by option("--leader").choice(*RaftLeaders.ALL.keys.toTypedArray())
+        .default(RaftLeaders.DEMO.first)
     val logImpl by option("--log").choice(*LogStorages.ALL.keys.toTypedArray()).default(LogStorages.IN_MEMORY.first)
 
     init {
