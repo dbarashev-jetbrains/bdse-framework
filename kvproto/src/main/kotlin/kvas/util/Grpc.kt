@@ -78,7 +78,7 @@ class KvasPool<Stub : AbstractBlockingStub<Stub>>(
 
     override fun <T> rpc(address: NodeAddress, code: Stub.() -> T) =
         if (address != selfAddress && isNodeOffline) throw RuntimeException("This node is currently offline")
-        else code(stubs.getOrPut(address) { stubFactory(address) })
+        else code(stubs.getOrPut(address) { stubFactory(address).withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS) })
 
     val nodes: Map<NodeAddress, Stub> get() = stubs.toMap()
 

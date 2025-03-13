@@ -25,17 +25,19 @@ import kotlin.concurrent.timer
 import kotlin.concurrent.withLock
 
 typealias ReplicationResult = Pair<LogEntryNumber, Status>
+
 /**
- * Demo RAFT replication leader. This implementation simply tries to replicate new entries to the quorum, as they come.
+ * Demo RAFT replication leader. This implementation simply tries to replicate new entries to the quorum, as they come,
+ * and wait until either ACK or NACK from a quorum.
  */
 class DemoReplicationLeader(
     private val clusterState: ClusterState,
     private val nodeState: NodeState,
-    private val delegateStorage: Storage,
+    private val dataStorage: Storage,
     private val logStorage: LogStorage
 ) : RaftReplicationLeader, DataServiceGrpcKt.DataServiceCoroutineImplBase() {
 
-    private val replicationController = ReplicationController(clusterState, nodeState)
+    private val replicationController = ReplicationController(clusterState, nodeState, dataStorage)
     private val heartbeatTimeout = timer("Heartbeat Timeout", false, HEARTBEAT_PERIOD / 2, HEARTBEAT_PERIOD) {
         if (nodeState.raftRole.value == RaftRole.LEADER) {
             replicationController.replicate()
@@ -59,8 +61,11 @@ class DemoReplicationLeader(
         replicationController.restart()
     }
 
+    /**
+     * GET returns values directly from the data storage.
+     */
     override suspend fun getValue(request: GetValueRequest): GetValueResponse = try {
-        val value = delegateStorage.get(request.rowKey, request.columnName)
+        val value = dataStorage.get(request.rowKey, request.columnName)
         getValueResponse {
             if (value != null) {
                 this.value = StringValue.of(value)
@@ -74,10 +79,20 @@ class DemoReplicationLeader(
         }
     }
 
-    override suspend fun putValue(request: PutValueRequest): PutValueResponse {
+    /**
+     * PUT protocol:
+     * 1. Append a new entry to the log.
+     * 2. Request the replication controller to replicate a new entry and wait for the result.
+     * 3. If the controller successfully replicates to a quorum, the entry will become committed and will be applied
+     *    to the local data storage.
+     *
+     * The response status code is OK if a new entry was successfully replicated and committed, otherwise
+     * other codes are used.
+     */
+    override suspend fun putValue(request: PutValueRequest): PutValueResponse = try {
         if (nodeState.raftRole.value != RaftRole.LEADER) {
             // Follower nodes send redirects to the leader.
-            return putValueResponse {
+            putValueResponse {
                 code = StatusCode.REDIRECT
                 leaderAddress = clusterState.leaderAddress.toString()
             }
@@ -89,13 +104,13 @@ class DemoReplicationLeader(
             // First we create a new entry...
             val logEntry = createLogEntry(request)
             // ... and then try replicating it to the quorum.
-            // The replicate call is synchronous, in the sense that it will not return until either the new entry is accepted
-            // by the quorum, or we receive negative responses from all nodes.
+            // The replicate call is synchronous, in the sense that it will not return until we receive responses from
+            // the quorum.
             val replicationStatus: StatusCode = replicationController.replicateToQuorum(logEntry.entryNumber)
 
-            return if (replicationStatus == StatusCode.OK) {
+            if (replicationStatus == StatusCode.OK) {
                 // In case of success, we are okay to write the update to the storage and reply OK to the client.
-                delegateStorage.put(request.rowKey, request.columnName, request.value)
+                dataStorage.put(request.rowKey, request.columnName, request.value)
                 putValueResponse {
                     code = StatusCode.OK
                 }
@@ -105,6 +120,11 @@ class DemoReplicationLeader(
                     this.code = replicationStatus
                 }
             }
+        }
+    } catch (ex: Throwable) {
+        LOG.error("Failed to PUT key={}", request.rowKey, ex)
+        putValueResponse {
+            this.code = StatusCode.STORAGE_ERROR
         }
     }
 
@@ -124,7 +144,7 @@ class DemoReplicationLeader(
                         .setTermNumber(nodeState.currentTerm).build()
                 )
                 .build()
-            println("LEADER: !!! added ${newEntry.entryNumber.toLogString()}")
+            LOG.debug("LEADER: added ${newEntry.entryNumber.toLogString()}")
             logStorage.add(newEntry)
             newEntry
         }
@@ -147,7 +167,11 @@ class DemoReplicationLeader(
  * This is a part of the DEMO RaftReplicationLeader implementation.
  * You may use it as a reference or a starting point of your own implementation of the correct RAFT replication protocol.
  */
-class ReplicationController(private val clusterState: ClusterState, private val nodeState: NodeState) {
+class ReplicationController(
+    private val clusterState: ClusterState,
+    private val nodeState: NodeState,
+    private val dataStorage: Storage
+) {
     private val log = LoggerFactory.getLogger("Raft.Leader.ReplicationController")
     private val replicationOutChannel: Channel<ReplicationResult> = Channel()
     private val replica2logSender: MutableMap<NodeAddress, RaftLogSender> = mutableMapOf()
@@ -195,12 +219,14 @@ class ReplicationController(private val clusterState: ClusterState, private val 
         try {
             while (true) {
                 replicationLock.withLock {
-                    // TODO: process the case when we failed to get the quorum
                     // We are waiting for at least quorumSize messages indicating that logEntry was successfully replicated.
-                    if (replicationCounter.getOrDefault(logEntry, 0 to 0).first >= clusterState.quorumSize) {
+                    val currentResult = replicationCounter.getOrDefault(logEntry, 0 to 0)
+                    if (currentResult.first >= clusterState.quorumSize) {
                         return StatusCode.OK
+                    } else if (currentResult.second >= clusterState.quorumSize) {
+                        return StatusCode.COMMIT_FAILED
                     } else {
-                        // Wait if we have not yet received enough acks.
+                        // Wait if we have not yet received enough replies.
                         replicationTrigger.await()
                     }
                 }
@@ -253,7 +279,8 @@ class ReplicationController(private val clusterState: ClusterState, private val 
                 replicationCounter[entry],
                 clusterState.raftNodes.size
             )
-            nodeState.logStorage.lastCommittedEntryNum.value = entry
+            val currentlyLastCommited = nodeState.logStorage.lastCommittedEntryNum.value
+            nodeState.logStorage.commitRange(dataStorage, currentlyLastCommited, entry)
         }
     }
 }
@@ -374,4 +401,4 @@ class RaftLogSender(
 }
 
 internal val replicationScope = CoroutineScope(Executors.newCachedThreadPool().asCoroutineDispatcher())
-private val LOG = org.slf4j.LoggerFactory.getLogger("Raft.Leader")
+private val LOG = LoggerFactory.getLogger("Raft.Leader")

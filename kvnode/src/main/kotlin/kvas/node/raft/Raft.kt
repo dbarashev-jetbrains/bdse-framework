@@ -283,4 +283,4 @@ class ElectionService(
 }
 
 internal val LOG_ELECTION = LoggerFactory.getLogger("Raft.Election")
-internal const val HEARTBEAT_PERIOD = 2000L
+internal const val HEARTBEAT_PERIOD = 5000L

@@ -268,6 +268,7 @@ internal class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
     val leader by option("--leader").choice(*RaftLeaders.ALL.keys.toTypedArray())
         .default(RaftLeaders.DEMO.first)
     val logImpl by option("--log").choice(*LogStorages.ALL.keys.toTypedArray()).default(LogStorages.IN_MEMORY.first)
+    val allImpls by option("--all").choice("demo", "real", "**").default("**")
 
     init {
         context {
@@ -276,7 +277,11 @@ internal class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
     }
 
     override fun run(value: KvasNodeBuilder): KvasNodeBuilder {
-        value.raftConfig = RaftConfig(electionProtocol, leader, follower, logImpl)
+        value.raftConfig = if (allImpls == "**") {
+            RaftConfig(electionProtocol, leader, follower, logImpl)
+        } else {
+            RaftConfig(allImpls, allImpls, allImpls, allImpls)
+        }
         value.raftConfig.isConfigured = true
         return value
     }

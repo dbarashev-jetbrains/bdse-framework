@@ -22,6 +22,10 @@ object RaftFollowers {
     val ALL = listOf(DEMO, REAL).toMap()
 }
 
+/**
+ * This is a DEMO implementation of the RAFT AppendLog protocol on the follower side.
+ * It works in the basic success case when the cluster nodes do not fail and network partitions do not happen.
+ */
 class DemoReplicationFollower(
     private val clusterState: ClusterState,
     private val nodeState: NodeState,
@@ -29,18 +33,20 @@ class DemoReplicationFollower(
 ) : AppendLogProtocol {
     val log = LoggerFactory.getLogger("Raft.Follower")
 
-    override fun appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse {
-        return synchronized(nodeState) {
+    override fun appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse = try {
+        synchronized(nodeState) {
             _appendLog(request)
         }
+    } catch (ex: Throwable) {
+        log.error("Failure when processing AppendLog", ex)
+        throw ex
     }
 
     fun _appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse {
-        // Are we sure that the request comes from the most actual leader?
-
-        // Let's pretend we are sure, and start adding the entry to the local log and updating the
-        // cluster information.
         if (request.senderAddress != clusterState.leaderAddress.toString()) {
+            // It is a surprise, however, it is possible that this node is unaware of a new leader.
+            // If the request passes some sanity checks, it is okay to recognize the sender as a new leader.
+            // However, this is a demo, so no sanity checks are implemented.
             log.debug("AppendLog from {}", request.senderAddress)
             log.debug(
                 "Its term={} my term={}. My last log entry={}",
@@ -53,7 +59,7 @@ class DemoReplicationFollower(
 
         clusterState.updateLeader(request)
         nodeState.currentTerm = request.termNumber
-        // We consider this request as legitimate, so let's update the leader, term and role.
+
         if (request.senderAddress != nodeState.address.toString()) {
             nodeState.raftRole.value = RaftRole.FOLLOWER
         }
@@ -63,49 +69,69 @@ class DemoReplicationFollower(
         if (request.hasEntry()) {
             // The entry that is being replicated may or may not be in the local log storage.
             // The usual case when it is already in the storage is when this code is running on the leader:
-            // we have already put the entry to the log before we started replication, and now we're "replicating" it.
+            // we have already put the entry to the log before we started replication, and now we're "replicating"
+            // it to ourselves.
             // However, it may as well be in the log because of other reasons, e.g. when a new leader completes
             // the replication that was terminated with the death of the old one.
 
-            val lastLogEntry = nodeState.logStorage.lastOrNull()?.entryNumber
             val requestLogEntryNum = request.entry.entryNumber
-            if (lastLogEntry != null) {
-                if (requestLogEntryNum.compareTo(lastLogEntry) < 0) {
-                    if (requestLogEntryNum.compareTo(nodeState.logStorage.lastCommittedEntryNum.value) < 0) {
-                        println("Last log entry is ${lastLogEntry.toLogString()} request is ${requestLogEntryNum.toLogString()}")
-                        return raftAppendLogResponse {
-                            this.status = RaftAppendLogResponse.Status.REJECT
-                            this.lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
-                            this.termNumber = nodeState.currentTerm
-                        }
-                    }
-                }
-                if (requestLogEntryNum.compareTo(lastLogEntry) == 0) {
-                    return raftAppendLogResponse {
-                        this.status = RaftAppendLogResponse.Status.OK
-                        this.lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
-                        this.termNumber = nodeState.currentTerm
-                    }
-                }
-                if (requestLogEntryNum.compareTo(lastLogEntry) > 0) {
-                    if (requestLogEntryNum.ordinalNumber != lastLogEntry.ordinalNumber + 1) {
-                        return raftAppendLogResponse {
-                            this.status = RaftAppendLogResponse.Status.LOG_MISMATCH
-                            this.lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
-                            this.termNumber = nodeState.currentTerm
-                        }
-                    } else {
-                        println("FOLLOWER: !!! added ${request.entry.entryNumber.toLogString()} (last log=${lastLogEntry.toLogString()})")
-                        nodeState.logStorage.add(request.entry)
-                    }
-                }
-            } else {
-                println("FOLLOWER: !!! added ${request.entry.entryNumber.toLogString()}")
+            val lastLogEntry = nodeState.logStorage.lastOrNull()?.entryNumber
+
+            if (lastLogEntry == null) {
+                // This is the success case: our replication log is empty!
+                log.debug("Entry {} is appended to the local log", requestLogEntryNum)
                 nodeState.logStorage.add(request.entry)
+            } else  {
+                val compareResult = requestLogEntryNum.compareTo(lastLogEntry)
+                when {
+                    compareResult > 0 -> {
+                        // This is probably the success case: the replicated entry immediately follows the last entry
+                        // in the local replication log.
+                        if (requestLogEntryNum.ordinalNumber == lastLogEntry.ordinalNumber + 1) {
+                            log.debug("Entry {} is appended to the local log", requestLogEntryNum)
+                            nodeState.logStorage.add(request.entry)
+                        } else {
+                            // But it is also possible thst this node is lagging behind the leader.
+                            return raftAppendLogResponse {
+                                this.status = RaftAppendLogResponse.Status.LOG_MISMATCH
+                                this.lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
+                                this.termNumber = nodeState.currentTerm
+                            }
+                        }
+                    }
+                    compareResult == 0 -> {
+                        // We have this entry in our local replication log.  We do not return, because it is possible,
+                        // that the last committed entry is different.
+                        log.debug("Entry {} is already in the local log", requestLogEntryNum)
+                    }
+                    compareResult < 0 -> {
+                        // Well, we have something older in the local replication log.
+                        if (requestLogEntryNum.compareTo(nodeState.logStorage.lastCommittedEntryNum.value) < 0) {
+                            // If the older entry is committed, then the sender is likely to be slightly out of date
+                            // (perhaps the sender is a former leader who is unaware of the presence of a new one).
+                            log.warn("The last committed entry={} > the request entry={}", nodeState.logStorage.lastCommittedEntryNum.value, requestLogEntryNum)
+                            return raftAppendLogResponse {
+                                this.status = RaftAppendLogResponse.Status.REJECT
+                                this.lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
+                                this.termNumber = nodeState.currentTerm
+                            }
+                        } else {
+                            // It is possible that the local replication log contains some entries that never
+                            // committed (because their leader didn't manage to gather a quorum).
+                            // But as this is a demo, we don't care too much.
+                            return raftAppendLogResponse {
+                                this.status = RaftAppendLogResponse.Status.LOG_MISMATCH
+                                this.lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
+                                this.termNumber = nodeState.currentTerm
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        // Even if there is no entry being replicated, we may need to commit some of the log entries to match the last
+        // We get here if the request contains no replicated entry or if the replicated entry was successfully
+        // added to the local log. We need to check if we need to commit some of the log entries to match the last
         // committed entry in the request.
         val lastCommittedEntryNum = nodeState.logStorage.lastCommittedEntryNum.value
         if (lastCommittedEntryNum.compareTo(request.lastCommittedEntry) < 0) {

@@ -74,13 +74,21 @@ class DemoElectionProtocol(
     val quorumSize get() = clusterState.quorumSize
 
     override fun tryBecomeLeader() {
-        if (nodeState.raftRole.value != RaftRole.FOLLOWER) {
-            LOG.debug("Current role={}. The election protocol can start when a node is a FOLLOWER.", nodeState.raftRole)
-            return
+        when (nodeState.raftRole.value) {
+            RaftRole.LEADER -> {
+                LOG.debug("I am a LEADER.")
+                return
+            }
+            RaftRole.CANDIDATE -> {
+                LOG.debug("I am a CANDIDATE, I am not going to start elections again.")
+                return
+            }
+            else -> {}
         }
+
         if (!clusterState.isLeaderDead) {
             // If we received the heartbeat within the timeout, we don't start the election.
-            LOG.debug("The leader is not dead")
+            LOG.debug("The leader {} is not dead", clusterState.leaderAddress)
             return
         }
         LOG.debug("Trying to become a CANDIDATE...")
