@@ -125,6 +125,7 @@ internal class KvasNodeBuilder {
             metadataListeners.forEach { it.invoke(shardingChangeRequest.metadata) }
         })
         grpcBuilder.addService(StatisticsService(statisticsStorage))
+        grpcBuilder.addService(OutageEmulatorServiceImpl(selfAddress, clusterOutageState))
     }
 
     override fun toString(): String {

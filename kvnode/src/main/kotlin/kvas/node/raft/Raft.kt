@@ -10,10 +10,7 @@ import kvas.proto.*
 import kvas.proto.ElectionServiceGrpc.ElectionServiceBlockingStub
 import kvas.proto.ElectionServiceGrpcKt.ElectionServiceCoroutineImplBase
 import kvas.proto.KvasRaftProto.*
-import kvas.util.KvasPool
-import kvas.util.NodeAddress
-import kvas.util.ObservableProperty
-import kvas.util.toNodeAddress
+import kvas.util.*
 import org.slf4j.LoggerFactory
 import java.util.*
 import java.util.concurrent.atomic.AtomicInteger
@@ -111,7 +108,7 @@ class RaftNode(
     private val replicationFollower =
         RaftFollowers.ALL[raftConfig.follower]!!.invoke(clusterState, nodeState, delegateStorage)
     private val replicationLeader =
-        RaftLeaders.ALL[raftConfig.leader]!!.invoke(clusterState, nodeState, delegateStorage, logStorage)
+        RaftLeaders.ALL[raftConfig.leader]!!.invoke(clusterState, nodeState, delegateStorage, logStorage, clusterOutageState)
 
     init {
         nodeState.raftRole.subscribe { oldRole, newRole ->
@@ -231,10 +228,8 @@ class ElectionService(
     private val clusterOutageState: ClusterOutageState
 ) : ElectionServiceCoroutineImplBase() {
 
-    private val electionPool = KvasPool<ElectionServiceBlockingStub>(nodeState.address) {
-        ManagedChannelBuilder.forAddress(it.host, it.port).usePlaintext().build().let { channel ->
-            ElectionServiceGrpc.newBlockingStub(channel)
-        }
+    private val electionPool = GrpcPoolImpl<ElectionServiceBlockingStub>(nodeState.address) {
+        channel -> ElectionServiceGrpc.newBlockingStub(channel)
     }
 
     // Timer that initiates new leader elections.

@@ -1,5 +1,6 @@
 package kvas.util
 
+import io.grpc.Channel
 import io.grpc.ManagedChannel
 import io.grpc.ManagedChannelBuilder
 import io.grpc.stub.AbstractBlockingStub
@@ -85,6 +86,23 @@ class KvasPool<Stub : AbstractBlockingStub<Stub>>(
     override fun close() {
         stubs.values.forEach { (it.channel as? ManagedChannel)?.shutdownNow() }
     }
+}
+
+class GrpcPoolImpl<Stub : AbstractBlockingStub<Stub>>(
+    private val selfAddress: NodeAddress,
+    private val stubFactory: (Channel) -> Stub
+) : GrpcPool<Stub> {
+    private val channels = mutableMapOf<NodeAddress, Channel>()
+
+    override fun <T> rpc(address: NodeAddress, code: Stub.() -> T): T {
+        val channel = channels.getOrPut(address) { ManagedChannelBuilder.forAddress(address.host, address.port).usePlaintext().build() }
+        return code(stubFactory(channel).withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS))
+    }
+
+    override fun close() {
+        channels.values.forEach { (it as? ManagedChannel)?.shutdownNow() }
+    }
+
 }
 
 fun LogEntryNumber.compareTo(other: LogEntryNumber) =

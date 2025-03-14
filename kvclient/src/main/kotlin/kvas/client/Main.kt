@@ -9,6 +9,7 @@ import com.github.ajalt.clikt.parameters.types.int
 import io.grpc.ManagedChannelBuilder
 import kvas.proto.DataServiceGrpc
 import kvas.proto.MetadataServiceGrpc
+import kvas.proto.OutageEmulatorServiceGrpc
 import kvas.proto.StatisticsGrpc
 import kvas.setup.AllShardings
 import kvas.setup.NotImplementedSharding
@@ -51,6 +52,10 @@ class Main : CliktCommand() {
                 StatisticsGrpc.newBlockingStub(
                     ManagedChannelBuilder.forAddress(nodeAddress.host, nodeAddress.port).usePlaintext().build()
                 )
+            },
+            { nodeAddress ->
+                OutageEmulatorServiceGrpc.newBlockingStub(
+                    ManagedChannelBuilder.forAddress(nodeAddress.host, nodeAddress.port).usePlaintext().build())
             }
         )
 }
@@ -110,15 +115,49 @@ class Shell : CliktCommand(name = "shell") {
             if (input.isBlank()) {
                 break
             }
-            val keyValue = input.split("=", limit = 2)
-            if (keyValue.size == 2) {
-                println("executing PUT")
-                kvasClient.put(keyValue[0], keyValue[1])
+            if (input.startsWith("/")) {
+                processCommand(input, kvasClient)
             } else {
-                val value = kvasClient.get(keyValue[0])
-                println("$keyValue=$value")
+                val keyValue = input.split("=", limit = 2)
+                if (keyValue.size == 2) {
+                    println("executing PUT")
+                    kvasClient.put(keyValue[0], keyValue[1])
+                } else {
+                    val value = kvasClient.get(keyValue[0])
+                    println("$keyValue=$value")
+                }
             }
         }
+    }
+
+    private fun processCommand(input: String, kvasClient: KvasClient) {
+        val words = input.split(" ")
+        when (words[0]) {
+            "/exit" -> System.exit(0)
+            "/offline" -> {
+                setAvailable(kvasClient, words.drop(1), false)
+            }
+            "/online" -> {
+                setAvailable(kvasClient, words.drop(1), true)
+            }
+        }
+    }
+
+    private fun setAvailable(kvasClient: KvasClient, words: List<String>, isAvailable: Boolean) {
+        if (words.isEmpty()) {
+            println("Invalid number of arguments")
+            return
+        }
+        words.forEach { word ->
+            if (word.indexOf("..") < 0) {
+                kvasClient.sendNodeAvailable(word, isAvailable)
+            } else {
+                val (src, dst) = word.split("..", limit = 2)
+                kvasClient.sendLinkAvailable(src, dst, isAvailable)
+                kvasClient.sendLinkAvailable(dst, src, isAvailable)
+            }
+        }
+
     }
 }
 

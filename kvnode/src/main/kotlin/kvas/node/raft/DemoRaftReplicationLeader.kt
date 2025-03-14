@@ -1,9 +1,10 @@
 package kvas.node.raft
 
 import com.google.protobuf.StringValue
-import io.grpc.ManagedChannelBuilder
+import io.grpc.StatusRuntimeException
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kvas.node.storage.ClusterOutageState
 import kvas.node.storage.Storage
 import kvas.proto.*
 import kvas.proto.KvasProto.*
@@ -13,10 +14,7 @@ import kvas.proto.KvasReplicationProto.LogEntry
 import kvas.proto.KvasReplicationProto.LogEntryNumber
 import kvas.proto.KvasSharedProto.DataRow
 import kvas.proto.RaftReplicationServiceGrpc.RaftReplicationServiceBlockingStub
-import kvas.util.KvasPool
-import kvas.util.NodeAddress
-import kvas.util.compareTo
-import kvas.util.toLogString
+import kvas.util.*
 import org.slf4j.LoggerFactory
 import java.util.concurrent.Executors
 import java.util.concurrent.locks.Condition
@@ -34,10 +32,11 @@ class DemoReplicationLeader(
     private val clusterState: ClusterState,
     private val nodeState: NodeState,
     private val dataStorage: Storage,
-    private val logStorage: LogStorage
+    private val logStorage: LogStorage,
+    private val clusterOutageState: ClusterOutageState
 ) : RaftReplicationLeader, DataServiceGrpcKt.DataServiceCoroutineImplBase() {
 
-    private val replicationController = ReplicationController(clusterState, nodeState, dataStorage)
+    private val replicationController = ReplicationController(clusterState, nodeState, dataStorage, clusterOutageState)
     private val heartbeatTimeout = timer("Heartbeat Timeout", false, HEARTBEAT_PERIOD / 2, HEARTBEAT_PERIOD) {
         if (nodeState.raftRole.value == RaftRole.LEADER) {
             replicationController.replicate()
@@ -170,7 +169,8 @@ class DemoReplicationLeader(
 class ReplicationController(
     private val clusterState: ClusterState,
     private val nodeState: NodeState,
-    private val dataStorage: Storage
+    private val dataStorage: Storage,
+    private val clusterOutageState: ClusterOutageState
 ) {
     private val log = LoggerFactory.getLogger("Raft.Leader.ReplicationController")
     private val replicationOutChannel: Channel<ReplicationResult> = Channel()
@@ -187,7 +187,7 @@ class ReplicationController(
     }
 
     private fun createLogSender(replicaAddress: NodeAddress) =
-        RaftLogSender(nodeState, replicationOutChannel, replicaAddress)
+        RaftLogSender(nodeState, replicationOutChannel, replicaAddress, clusterOutageState)
 
     private fun start() {
         synchronized(replica2logSender) {
@@ -294,7 +294,8 @@ class ReplicationController(
 class RaftLogSender(
     private val nodeState: NodeState,
     private val replicationOutChannel: Channel<ReplicationResult>,
-    private val replicaAddress: NodeAddress
+    private val replicaAddress: NodeAddress,
+    private val clusterOutageState: ClusterOutageState
 ) {
     private var isStopped = false
     private val log = LoggerFactory.getLogger("Raft.Leader.LogSender")
@@ -302,10 +303,8 @@ class RaftLogSender(
 
 
     private var appendLogJob: Job? = null
-    val appendLogPool = KvasPool<RaftReplicationServiceBlockingStub>(NodeAddress("", 0)) {
-        ManagedChannelBuilder.forAddress(it.host, it.port).usePlaintext().build().let { channel ->
-            RaftReplicationServiceGrpc.newBlockingStub(channel)
-        }
+    val appendLogPool = GrpcPoolImpl<RaftReplicationServiceBlockingStub>(NodeAddress("", 0)) {
+         channel -> RaftReplicationServiceGrpc.newBlockingStub(channel)
     }
 
     fun stop() {
@@ -333,6 +332,12 @@ class RaftLogSender(
                     }
                     log.debug("Sending a log entry {} to {}", currentEntry?.entryNumber ?: "--", replicaAddress)
                     val resp = try {
+                        if (!clusterOutageState.isAvailable) {
+                            throw StatusRuntimeException(io.grpc.Status.UNAVAILABLE)
+                        }
+                        if (clusterOutageState.unavailableNodes.contains(replicaAddress)) {
+                            throw StatusRuntimeException(io.grpc.Status.UNAVAILABLE)
+                        }
                         appendLogPool.rpc(replicaAddress) { appendLog(req) }
                     } catch (ex: Exception) {
                         log.error("Exception when sending AppendLog to {}", replicaAddress, ex)

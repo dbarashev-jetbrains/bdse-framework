@@ -26,7 +26,8 @@ class KvasClient(
     metadataAddress: NodeAddress,
     metadataStubFactory: (NodeAddress) -> MetadataServiceGrpc.MetadataServiceBlockingStub,
     private val dataStubFactory: (NodeAddress) -> DataServiceGrpc.DataServiceBlockingStub,
-    private val statisticsFactory: (NodeAddress) -> StatisticsGrpc.StatisticsBlockingStub
+    private val statisticsFactory: (NodeAddress) -> StatisticsGrpc.StatisticsBlockingStub,
+    private val outageEmulatorFactory: (NodeAddress) -> OutageEmulatorServiceGrpc.OutageEmulatorServiceBlockingStub
 ) {
     private val metadataStub = metadataStubFactory(metadataAddress)
     private val nodeStubs = mutableMapOf<String, DataServiceGrpc.DataServiceBlockingStub>()
@@ -177,6 +178,31 @@ class KvasClient(
         }
         (metadataStub.channel as? ManagedChannel)?.shutdownNow()
     }
+
+    fun sendNodeAvailable(address: String, isAvailable: Boolean) {
+        outageEmulatorFactory.invoke(address.toNodeAddress()).let {
+            it.setAvailable(
+                setAvailableRequest {
+                    this.isAvailable = isAvailable
+                    this.address = address
+                }
+            )
+            (it.channel as? ManagedChannel)?.shutdownNow()
+        }
+    }
+
+    fun sendLinkAvailable(srcAddress: String, dstAddress: String, isAvailable: Boolean) {
+        outageEmulatorFactory.invoke(srcAddress.toNodeAddress()).let {
+            it.setAvailable(
+                setAvailableRequest {
+                    this.isAvailable = isAvailable
+                    this.address = dstAddress
+                })
+            (it.channel as? ManagedChannel)?.shutdownNow()
+        }
+    }
+
+
 }
 
 val LEADER_NODE_SELECTOR: (ReplicatedShard)->NodeInfo = { it.leader }
