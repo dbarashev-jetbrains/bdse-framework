@@ -98,6 +98,7 @@ class Put : CliktCommand(name = "put") {
  * - Pressing Enter or providing an empty line to exit the shell.
  */
 class Shell : CliktCommand(name = "shell") {
+    val writeNode by option().choice("leader", "random").default("leader")
     val kvasClientFactory by requireObject<() -> KvasClient>()
     override fun run() {
         println(
@@ -120,8 +121,7 @@ class Shell : CliktCommand(name = "shell") {
             } else {
                 val keyValue = input.split("=", limit = 2)
                 if (keyValue.size == 2) {
-                    println("executing PUT")
-                    kvasClient.put(keyValue[0], keyValue[1])
+                    kvasClient.put(keyValue[0], keyValue[1], writeNode.toWriteNodeSelector())
                 } else {
                     val value = kvasClient.get(keyValue[0])
                     println("$keyValue=$value")
@@ -171,16 +171,11 @@ class LoadTestCommand : CliktCommand(name = "loadtest") {
     val keyCount by option().int().default(1)
     val clientCount by option().int().default(1)
     val workload by option().choice("READONLY", "MIXED").default("MIXED")
-    val writeNode by option().choice("leader", "random").default("leader")
+    val writeNode by option().choice("leader", "random", "raft").default("leader")
 
     override fun run() {
-        val writeNodeSelector = when (writeNode) {
-            "leader" -> LEADER_NODE_SELECTOR
-            "random" -> RANDOM_NODE_SELECTOR
-            else -> throw IllegalArgumentException("Unknown write node selector: $writeNode")
-        }
         val loadTest = LoadTest(Workload.valueOf(workload), keyCount, clientCount) {
-            KvasBackend(kvasClientFactory(), writeNodeSelector)
+            KvasBackend(kvasClientFactory(), writeNode.toWriteNodeSelector())
         }
         loadTest.generateWorkload()
         kvasClientFactory().getNodeStatistics().forEach {
@@ -188,6 +183,12 @@ class LoadTestCommand : CliktCommand(name = "loadtest") {
         }
         System.exit(0)
     }
+}
+
+private fun String.toWriteNodeSelector() = when (this) {
+    "leader" -> LEADER_NODE_SELECTOR
+    "random" -> RANDOM_NODE_SELECTOR
+    else -> throw IllegalArgumentException("Unknown write node selector: $this")
 }
 
 fun main(args: Array<String>) = Main().subcommands(Get(), Put(), Shell(), LoadTestCommand()).main(args)

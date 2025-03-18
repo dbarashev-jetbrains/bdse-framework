@@ -101,7 +101,6 @@ class DemoElectionProtocol(
             lastLogEntryNumber = nodeState.logStorage.lastOrNull()?.entryNumber ?: LogEntryNumber.getDefaultInstance()
         }
         val grantedVotes = mutableSetOf<String>()
-        grantedVotes.add(nodeState.address.toString())
 
         val allVoters = clusterState.raftNodes
         LOG.debug("RAFT voters: {}", allVoters)
@@ -130,6 +129,7 @@ class DemoElectionProtocol(
         if (grantedVotes.size >= quorumSize) {
             LOG.info("This node won elections with grants from {}", grantedVotes)
             nodeState.raftRole.value = RaftRole.LEADER
+            clusterState.clearLeader()
         } else {
             LOG.info("This node failed to win the elections, so it is now a FOLLOWER again")
             nodeState.raftRole.value = RaftRole.FOLLOWER
@@ -138,7 +138,7 @@ class DemoElectionProtocol(
 
     override fun processElectionRequest(request: LeaderElectionRequest): LeaderElectionResponse {
         LOG.info("Received election request from {}", request.nodeAddress)
-        return if (nodeState.raftRole.value == RaftRole.FOLLOWER) {
+        val response = if (nodeState.raftRole.value == RaftRole.FOLLOWER) {
             if (clusterState.isLeaderDead) {
                 LOG.info(
                     "I am a FOLLOWER, and I suspect the leader={} is dead. My vote: YES",
@@ -172,6 +172,10 @@ class DemoElectionProtocol(
                 voterTermNumber = nodeState.currentTerm
             }
         }
+        if (response.isGranted) {
+            clusterState.clearLeader()
+        }
+        return response
     }
 }
 

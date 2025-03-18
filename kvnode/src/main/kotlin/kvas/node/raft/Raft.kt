@@ -77,12 +77,17 @@ interface ClusterState {
     /**
      * The current leader address.
      */
-    val leaderAddress: NodeAddress get() = NodeAddress("127.0.0.1", 9000)
+    val leaderAddress: NodeAddress get() = NodeAddress("localhost", 0)
 
     /**
      * Updates leader information using the received log replication request.
      */
     fun updateLeader(logRequest: RaftAppendLogRequest)
+    fun clearLeader() {
+        updateLeader(raftAppendLogRequest {
+            this.senderAddress = ":0"
+        })
+    }
 }
 
 /**
@@ -202,10 +207,10 @@ class NodeStateImpl(
  */
 class ClusterStateImpl(selfAddress: NodeAddress, override val raftNodes: List<NodeAddress>) : ClusterState {
     var heartbeatTs = AtomicLong(0)
-    var leaderAddress_ = NodeAddress("127.0.0.1", 9000)
+    var leaderAddress_ = NodeAddress("127.0.0.1", 0)
 
     override val isLeaderDead: Boolean
-        get() = System.currentTimeMillis() - heartbeatTs.get() >= HEARTBEAT_PERIOD
+        get() = leaderAddress_.port == 0 || System.currentTimeMillis() - heartbeatTs.get() >= HEARTBEAT_PERIOD
 
     override val leaderAddress: NodeAddress
         get() = leaderAddress_
@@ -256,7 +261,9 @@ class ElectionService(
             period = Random.nextLong(HEARTBEAT_PERIOD, HEARTBEAT_PERIOD * 2).also {
                 LOG_ELECTION.info("Election timeout={}", it)
             }) {
-            electionProtocol.tryBecomeLeader()
+            if (clusterOutageState.isAvailable) {
+                electionProtocol.tryBecomeLeader()
+            }
         }
     }
 

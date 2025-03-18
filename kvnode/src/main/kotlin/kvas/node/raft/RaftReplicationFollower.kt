@@ -46,11 +46,11 @@ class DemoReplicationFollower(
     }
 
     fun _appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse {
-        if (request.senderAddress != clusterState.leaderAddress.toString()) {
+        if (request.senderAddress != clusterState.leaderAddress.toString() && clusterState.leaderAddress.port != 0) {
             // It is a surprise, however, it is possible that this node is unaware of a new leader.
             // If the request passes some sanity checks, it is okay to recognize the sender as a new leader.
             // However, this is a demo, so no sanity checks are implemented.
-            log.debug("AppendLog from {}", request.senderAddress)
+            log.debug("AppendLog from {}. I thought {} was a leader", request.senderAddress, clusterState.leaderAddress)
             log.debug(
                 "Its term={} my term={}. My last log entry={}",
                 request.termNumber,
@@ -58,6 +58,13 @@ class DemoReplicationFollower(
                 nodeState.logStorage.lastOrNull()?.entryNumber
             )
             log.debug(request.toString())
+            //
+            // However, as this is just a demo, we will reject AppendLog if it comes from some node that is not a leader
+            return raftAppendLogResponse {
+                this.status = RaftAppendLogResponse.Status.REJECT
+                this.lastCommittedEntry = nodeState.logStorage.lastCommittedEntryNum.value
+                this.termNumber = nodeState.currentTerm
+            }
         }
 
         clusterState.updateLeader(request)

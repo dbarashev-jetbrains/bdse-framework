@@ -22,8 +22,7 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.timer
 import kotlin.concurrent.withLock
 
-typealias ReplicationResult = Pair<LogEntryNumber, Status>
-
+data class ReplicationResult(val entry: LogEntryNumber, val status: Status, val replica: NodeAddress)
 /**
  * Demo RAFT replication leader. This implementation simply tries to replicate new entries to the quorum, as they come,
  * and wait until either ACK or NACK from a quorum.
@@ -92,34 +91,38 @@ class DemoReplicationLeader(
      * other codes are used.
      */
     override suspend fun putValue(request: PutValueRequest): PutValueResponse = try {
-        if (nodeState.raftRole.value != RaftRole.LEADER) {
+        if (clusterOutageState.isAvailable.not()) {
+            putValueResponse {
+                code = StatusCode.REFRESH_SHARDS
+            }
+        } else if (nodeState.raftRole.value != RaftRole.LEADER) {
             // Follower nodes send redirects to the leader.
             putValueResponse {
                 code = StatusCode.REDIRECT
                 leaderAddress = clusterState.leaderAddress.toString()
             }
-        }
+        } else {
+            // We synchronize on the service instance to make sure that requests are placed into the log and replicated
+            // in the same order.
+            synchronized(this) {
+                // First we create a new entry...
+                val logEntry = createLogEntry(request)
+                // ... and then try replicating it to the quorum.
+                // The replicate call is synchronous, in the sense that it will not return until we receive responses from
+                // the quorum.
+                val replicationStatus: StatusCode = replicationController.replicateToQuorum(logEntry.entryNumber)
 
-        // We synchronize on the service instance to make sure that requests are placed into the log and replicated
-        // in the same order.
-        synchronized(this) {
-            // First we create a new entry...
-            val logEntry = createLogEntry(request)
-            // ... and then try replicating it to the quorum.
-            // The replicate call is synchronous, in the sense that it will not return until we receive responses from
-            // the quorum.
-            val replicationStatus: StatusCode = replicationController.replicateToQuorum(logEntry.entryNumber)
-
-            if (replicationStatus == StatusCode.OK) {
-                // In case of success, we are okay to write the update to the storage and reply OK to the client.
-                dataStorage.put(request.rowKey, request.columnName, request.value)
-                putValueResponse {
-                    code = StatusCode.OK
-                }
-            } else {
-                // Otherwise we return error to the client
-                putValueResponse {
-                    this.code = replicationStatus
+                if (replicationStatus == StatusCode.OK) {
+                    // In case of success, we are okay to write the update to the storage and reply OK to the client.
+                    dataStorage.put(request.rowKey, request.columnName, request.value)
+                    putValueResponse {
+                        code = StatusCode.OK
+                    }
+                } else {
+                    // Otherwise we return error to the client
+                    putValueResponse {
+                        this.code = replicationStatus
+                    }
                 }
             }
         }
@@ -184,6 +187,7 @@ class ReplicationController(
     private val replicationCounter: MutableMap<LogEntryNumber, Pair<Int, Int>> = mutableMapOf()
     private val replicationLock: ReentrantLock = ReentrantLock()
     private val replicationTrigger: Condition = replicationLock.newCondition()
+    private val unavailableNodes = mutableSetOf<NodeAddress>()
 
     private fun addReplica(replicaAddress: NodeAddress) {
         synchronized(replica2logSender) {
@@ -197,6 +201,7 @@ class ReplicationController(
     private fun start() {
         synchronized(replica2logSender) {
             replica2logSender.clear()
+            replicationCounter.clear()
             clusterState.raftNodes.forEach { addReplica(it) }
         }
     }
@@ -260,18 +265,36 @@ class ReplicationController(
         for (result in replicationOutChannel) {
             replicationLock.withLock {
                 // Update the counter
-                var (currentSucceeded, currentFailed) = replicationCounter[result.first] ?: Pair(0, 0)
-                if (result.second == Status.OK) {
-                    currentSucceeded++
-                } else currentFailed++
-                replicationCounter[result.first] = Pair(currentSucceeded, currentFailed)
+                if (result.entry == LogEntryNumber.getDefaultInstance() && result.status == Status.UNAVAILABLE) {
+                    unavailableNodes.add(result.replica)
+                    if (unavailableNodes.size == clusterState.quorumSize) {
+                        LOG.debug("More than {} replicas are unavailable. Transitioning to FOLLOWER", clusterState.quorumSize)
+                        nodeState.raftRole.value = RaftRole.FOLLOWER
+                    }
+                } else {
+                    unavailableNodes.remove(result.replica)
+                    LOG.debug("Received result {}", result)
+                    var (currentSucceeded, currentFailed) = replicationCounter[result.entry] ?: Pair(0, 0)
+                    if (result.status == Status.OK) {
+                        currentSucceeded++
+                    } else currentFailed++
+                    replicationCounter[result.entry] = Pair(currentSucceeded, currentFailed)
 
-                // And notify all waiting
-                replicationTrigger.signalAll()
+                    // And notify all waiting
+                    replicationTrigger.signalAll()
 
-                // If replication is successful, we need to check if this value needs to be committed.
-                if (currentSucceeded >= clusterState.quorumSize) {
-                    this.onEntryCommitted(result.first)
+                    if (currentSucceeded >= clusterState.quorumSize) {
+                        // If replication is successful, we need to check if this value needs to be committed.
+                        this.onEntryCommitted(result.entry)
+                        LOG.debug("Entry {} replicated to quorum", result.entry.toLogString())
+                    } else if (currentFailed >= clusterState.quorumSize) {
+                        // This is a demo implementation, so if we fail to replicate to the quorum, we give up and become
+                        // a follower. This may not be necessary in the real leader implementation though.
+                        LOG.warn("Entry {} failed to replicate to quorum", result.entry.toLogString())
+                        nodeState.raftRole.value = RaftRole.FOLLOWER
+                    } else {
+                        LOG.debug("Received replies from {} replicas... need more", currentSucceeded + currentFailed)
+                    }
                 }
             }
         }
@@ -336,7 +359,7 @@ class RaftLogSender(
             if (appendLogJob != null) {
                 return
             }
-            log.debug("Running LogSender={} to {}", this, replicaAddress)
+            log.debug("Running {}", this)
             val job = replicationScope.launch {
                 while (!isStopped) {
                     val currentEntry = logView.get()
@@ -348,7 +371,6 @@ class RaftLogSender(
                         termNumber = nodeState.currentTerm
                         senderAddress = nodeState.address.toString()
                     }
-                    log.debug("Sending a log entry {} to {}", currentEntry?.entryNumber ?: "--", replicaAddress)
 
                     // We check if the call is allowed by the outage emulator.
                     val resp = try {
@@ -368,6 +390,7 @@ class RaftLogSender(
                         }
                     }
 
+                    log.debug("....{} result for entry {}", resp.status, currentEntry?.entryNumber ?: "--")
                     // Now let's analyze some of the call statuses
                     when (resp.status) {
                         // If replication completed OK, we advance the log iterator and will start replicating
@@ -398,10 +421,15 @@ class RaftLogSender(
                                     nodeState.raftRole.value = RaftRole.FOLLOWER
                                 }
                             } else {
+                                // However, since it is a demo, we will transition to FOLLOWER state just because some
+                                // node rejects our AppendLog. It may not be necessary in the real implementation.
                                 log.error(
                                     "Node {} rejected AppendLog request because of some other reason.",
                                     replicaAddress
                                 )
+                                if (replicaAddress != nodeState.address) {
+                                    nodeState.raftRole.value = RaftRole.FOLLOWER
+                                }
                             }
                         }
 
@@ -415,13 +443,15 @@ class RaftLogSender(
                         }
                     }
 
-                    // Break out of the loop if we reached the end of the log.
-                    if (currentEntry == null) {
-                        break
-                    } else {
+                    if (currentEntry != null || resp.status == Status.UNAVAILABLE) {
                         // We report the replication status to the channel, so that in case of success
                         // the controller could continue.
-                        replicationOutChannel.send(currentEntry.entryNumber to resp.status)
+                        replicationOutChannel.send(ReplicationResult(entry = currentEntry?.entryNumber ?: LogEntryNumber.getDefaultInstance(), status = resp.status, replica = replicaAddress))
+                    }
+
+                    if (currentEntry == null || resp.status != Status.OK) {
+                        // We will break out of the loop if we reached the end of the log, or if replication has not been successful.
+                        break
                     }
                 }
             }
@@ -429,10 +459,15 @@ class RaftLogSender(
             runBlocking {
                 job.join()
             }
-            log.debug("Log replication to {} completed", replicaAddress)
             appendLogJob = null
         }
     }
+
+    override fun toString(): String {
+        return "LogSender(replicaAddress=$replicaAddress)"
+    }
+
+
 }
 
 internal val replicationScope = CoroutineScope(Executors.newCachedThreadPool().asCoroutineDispatcher())
