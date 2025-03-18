@@ -35,14 +35,26 @@ service ElectionService {
   rpc LeaderElection(LeaderElectionRequest) returns (LeaderElectionResponse) {}
 }
 
-
+// A message from the leader node to the replica with the log entry being replicated.
+// The log entry may be missing, and in this case this message is just a heartbeat from the leader.
 message RaftAppendLogRequest {
+  // The entry being replicated.
   LogEntry entry = 1;
+
+  // Address of the leader node that sends this message.
   string sender_address = 2;
+
+  // The term number of the leader node.
   int32 term_number = 3;
+
+  // The last entry that is committed on the leader node.
   LogEntryNumber last_committed_entry = 4;
+
+  // Previous log entry number on the leader node.
+  LogEntryNumber previous_entry = 5;
 }
 
+// Response to AppendLog request.
 message RaftAppendLogResponse {
   enum Status {
     // The appended log suffix is okay, follower will commit it when instructed to do so.
@@ -61,7 +73,10 @@ message RaftAppendLogResponse {
   // Response status.
   Status status = 2;
 
+  // The term a replica is running in.
   int32 term_number = 3;
+
+  // The last committed entry on the replica. May be helpful to optimize the log suffix replication.
   LogEntryNumber last_committed_entry = 4;
 }
 

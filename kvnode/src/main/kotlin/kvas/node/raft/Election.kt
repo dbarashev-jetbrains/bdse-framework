@@ -19,7 +19,7 @@ object ElectionProtocols {
     val DEMO: ElectionProtocolProvider = "demo" to ::DemoElectionProtocol
     val REAL: ElectionProtocolProvider =
         "real" to { _: ClusterState, _: NodeState, _: LeaderElectionGrpc ->
-            TODO("Task X: implement your own RAFT election protocol")
+            TODO("Task 6: implement your own RAFT election protocol")
         }
 
     val ALL = listOf(DEMO, REAL).toMap()

@@ -1,15 +1,17 @@
 package kvas.node.raft
 
-import kotlinx.coroutines.runBlocking
 import kvas.node.storage.Storage
 import kvas.proto.KvasRaftProto
 import kvas.proto.KvasRaftProto.RaftAppendLogResponse
-import kvas.proto.KvasReplicationProto.LogEntryNumber
 import kvas.proto.raftAppendLogResponse
 import kvas.util.compareTo
 import kvas.util.toLogString
 import org.slf4j.LoggerFactory
 
+/**
+ * This is the follower part of the Raft replication protocol. `AppendLog` function is be called
+ * when a leader replicates new log entries to this follower or sends and empty "heartbeat" message.
+ */
 interface AppendLogProtocol {
     fun appendLog(request: KvasRaftProto.RaftAppendLogRequest): RaftAppendLogResponse
 }
@@ -20,7 +22,7 @@ typealias AppendLogProtocolProvider = Pair<String, AppendLogProtocolFactory>
 object RaftFollowers {
     val DEMO: AppendLogProtocolProvider = "demo" to ::DemoReplicationFollower
     val REAL: AppendLogProtocolProvider = "real" to { _: ClusterState, _: NodeState, _: Storage ->
-        TODO("Task X: Implement your own RAFT replication follower")
+        TODO("Task 7: Implement your own RAFT ApendLog protocol")
     }
     val ALL = listOf(DEMO, REAL).toMap()
 }
