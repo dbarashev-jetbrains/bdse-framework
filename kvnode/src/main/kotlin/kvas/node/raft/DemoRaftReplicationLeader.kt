@@ -27,6 +27,9 @@ typealias ReplicationResult = Pair<LogEntryNumber, Status>
 /**
  * Demo RAFT replication leader. This implementation simply tries to replicate new entries to the quorum, as they come,
  * and wait until either ACK or NACK from a quorum.
+ *
+ * This is a part of the DEMO RaftReplicationLeader implementation.
+ * You may use it as a reference or a starting point of your own implementation of the correct RAFT replication protocol.
  */
 class DemoReplicationLeader(
     private val clusterState: ClusterState,
@@ -37,13 +40,13 @@ class DemoReplicationLeader(
 ) : RaftReplicationLeader, DataServiceGrpcKt.DataServiceCoroutineImplBase() {
 
     private val replicationController = ReplicationController(clusterState, nodeState, dataStorage, clusterOutageState)
-    private val heartbeatTimeout = timer("Heartbeat Timeout", false, HEARTBEAT_PERIOD / 2, HEARTBEAT_PERIOD) {
-        if (nodeState.raftRole.value == RaftRole.LEADER) {
-            replicationController.replicate()
-        }
-    }
 
     init {
+        timer("Heartbeat Timeout", false, HEARTBEAT_PERIOD / 2, HEARTBEAT_PERIOD) {
+            if (nodeState.raftRole.value == RaftRole.LEADER) {
+                replicationController.replicate()
+            }
+        }
         nodeState.raftRole.subscribe { oldRole, newRole ->
             if (newRole == RaftRole.LEADER && oldRole == RaftRole.CANDIDATE) {
                 replicationController.restart()
@@ -172,10 +175,12 @@ class ReplicationController(
     private val dataStorage: Storage,
     private val clusterOutageState: ClusterOutageState
 ) {
-    private val log = LoggerFactory.getLogger("Raft.Leader.ReplicationController")
+    private val LOGGING = LoggerFactory.getLogger("Raft.Leader.ReplicationController")
+    // We will receive replication results through this channel.
     private val replicationOutChannel: Channel<ReplicationResult> = Channel()
+    // A map of all log senders.
     private val replica2logSender: MutableMap<NodeAddress, RaftLogSender> = mutableMapOf()
-    // Maps a log entry number to a pair of succeeded and failed replications.
+    // Maps a log entry number to a pair of succeeded and failed replications
     private val replicationCounter: MutableMap<LogEntryNumber, Pair<Int, Int>> = mutableMapOf()
     private val replicationLock: ReentrantLock = ReentrantLock()
     private val replicationTrigger: Condition = replicationLock.newCondition()
@@ -207,13 +212,16 @@ class ReplicationController(
             stop()
             start()
         }
-        log.info(
+        LOGGING.info(
             "Restarted log replication. I am {}. Replicas: {}",
             nodeState.raftRole,
             replica2logSender.keys.joinToString(separator = ", ")
         )
     }
 
+    /**
+     * This method starts the log senders and waits until a quorum of replicas acknowledges or rejects the entry replication.
+     */
     internal fun replicateToQuorum(logEntry: LogEntryNumber): StatusCode {
         replicate()
         try {
@@ -247,7 +255,7 @@ class ReplicationController(
      * until the end of replication to the quorum.
      */
     internal suspend fun receiveReplicationResults() {
-        // We take the results of replication of every log entry from the channel. Once a new result arrives, we update
+        // Every log sender reports the replication results to this channel. Once a new result arrives, we update
         // the accumulated result and notify all possibly waiting requests.
         for (result in replicationOutChannel) {
             replicationLock.withLock {
@@ -261,9 +269,7 @@ class ReplicationController(
                 // And notify all waiting
                 replicationTrigger.signalAll()
 
-                // We update the last committed entry number here rather than in putValue method because it is possible that
-                // the entry becomes committed when its corresponding Put request has already timed out, or even when the leader
-                // restarts.
+                // If replication is successful, we need to check if this value needs to be committed.
                 if (currentSucceeded >= clusterState.quorumSize) {
                     this.onEntryCommitted(result.first)
                 }
@@ -271,15 +277,20 @@ class ReplicationController(
         }
     }
 
+    /**
+     * Processes the event of committing an entry. We check if the entry number is greater than the number of
+     * the last committed entry and if this is the case, commit the whole range.
+     */
     private fun onEntryCommitted(entry: LogEntryNumber) {
-        if (nodeState.logStorage.lastCommittedEntryNum.value.compareTo(entry) < 0) {
-            log.debug(
+        val logStorage = nodeState.logStorage
+        if (logStorage.lastCommittedEntryNum.value.compareTo(entry) < 0) {
+            LOGGING.debug(
                 "Entry {} is committed with ACKs from {}/{} replicas",
                 entry.toLogString(),
                 replicationCounter[entry],
                 clusterState.raftNodes.size
             )
-            val currentlyLastCommited = nodeState.logStorage.lastCommittedEntryNum.value
+            val currentlyLastCommited = logStorage.lastCommittedEntryNum.value
             nodeState.logStorage.commitRange(dataStorage, currentlyLastCommited, entry)
         }
     }
@@ -299,6 +310,7 @@ class RaftLogSender(
 ) {
     private var isStopped = false
     private val log = LoggerFactory.getLogger("Raft.Leader.LogSender")
+    // This log sender will replicate entries using its own log iterator instance.
     private val logView = nodeState.logStorage.createIterator()
 
 
@@ -313,7 +325,13 @@ class RaftLogSender(
 
     }
 
+    /**
+     * Calling run() will start replication from the current position of the log iterator.
+     * It should work fine, assuming that all entries until the current one have been successfully replicated before,
+     * and now we're replicating the remaining suffix.
+     */
     fun run() {
+        // We don't want more than one replication job per replica running at any moment.
         synchronized(this) {
             if (appendLogJob != null) {
                 return
@@ -331,10 +349,14 @@ class RaftLogSender(
                         senderAddress = nodeState.address.toString()
                     }
                     log.debug("Sending a log entry {} to {}", currentEntry?.entryNumber ?: "--", replicaAddress)
+
+                    // We check if the call is allowed by the outage emulator.
                     val resp = try {
+                        // It is possible that this node is "offline"
                         if (!clusterOutageState.isAvailable) {
                             throw StatusRuntimeException(io.grpc.Status.UNAVAILABLE)
                         }
+                        // It is possible that there is "no connection" between this node and the replica.
                         if (clusterOutageState.unavailableNodes.contains(replicaAddress)) {
                             throw StatusRuntimeException(io.grpc.Status.UNAVAILABLE)
                         }
@@ -345,7 +367,11 @@ class RaftLogSender(
                             status = Status.UNAVAILABLE
                         }
                     }
+
+                    // Now let's analyze some of the call statuses
                     when (resp.status) {
+                        // If replication completed OK, we advance the log iterator and will start replicating
+                        // the next entry.
                         Status.OK -> {
                             if (currentEntry != null) {
                                 log.debug(
@@ -356,13 +382,17 @@ class RaftLogSender(
                                 logView.advance()
                             }
                         }
+                        // If replica rejected our entry, we check if the last committed entry on the replica is
+                        // more recent than ours. In this case we need to give up and become a follower, as
+                        // it is clear that there is another leader who committed more recent entries.
                         Status.REJECT -> {
-                            if (resp.lastCommittedEntry.compareTo(logView.lastCommittedEntry) > 0) {
+                            val lastCommitted = nodeState.logStorage.lastCommittedEntryNum.value
+                            if (resp.lastCommittedEntry.compareTo(lastCommitted) > 0) {
                                 log.debug(
                                     "Last committed entry={} at {} is newer than mine {}.",
                                     resp.lastCommittedEntry,
                                     replicaAddress,
-                                    logView.lastCommittedEntry
+                                    lastCommitted
                                 )
                                 if (replicaAddress != nodeState.address) {
                                     nodeState.raftRole.value = RaftRole.FOLLOWER
@@ -373,17 +403,15 @@ class RaftLogSender(
                                     replicaAddress
                                 )
                             }
-                            break
                         }
 
+                        // Otherwise we do nothing, because it is a demo implementation.
                         Status.UNAVAILABLE -> {
                             log.error("Node {} is unavailable", replicaAddress)
-                            break
                         }
 
                         else -> {
                             log.error("Received other response from node {}: {}", replicaAddress, resp)
-                            break
                         }
                     }
 
@@ -391,6 +419,8 @@ class RaftLogSender(
                     if (currentEntry == null) {
                         break
                     } else {
+                        // We report the replication status to the channel, so that in case of success
+                        // the controller could continue.
                         replicationOutChannel.send(currentEntry.entryNumber to resp.status)
                     }
                 }

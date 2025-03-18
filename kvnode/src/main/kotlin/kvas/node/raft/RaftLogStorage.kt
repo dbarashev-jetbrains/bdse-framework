@@ -2,6 +2,7 @@ package kvas.node.raft
 
 import kotlinx.coroutines.runBlocking
 import kvas.node.storage.Storage
+import kvas.node.storage.createDataSource
 import kvas.node.storage.globalPostgresConfig
 import kvas.proto.KvasReplicationProto.LogEntry
 import kvas.proto.KvasReplicationProto.LogEntryNumber
@@ -44,11 +45,6 @@ interface LogStorage {
  */
 interface LogIterator {
     /**
-     * Returns the last entry that is committed on this node.
-     */
-    val lastCommittedEntry: LogEntryNumber
-
-    /**
      * Returns the log entry where iterator is positioned at.
      */
     fun get(): LogEntry?
@@ -56,7 +52,7 @@ interface LogIterator {
     /**
      * Advances the iterator forwards.
      */
-    fun advance(): Boolean
+    fun advance()
 
     /**
      * Positions the iterator at the given entry.
@@ -70,19 +66,24 @@ interface LogIterator {
 object LogStorages {
     val IN_MEMORY = "memory" to ::InMemoryLogStorage
     val DBMS = "dbms" to {
-        DatabaseLogStorage(
-            globalPostgresConfig
-                ?: error("Please specify DBMS connection options using --storage dbms command line flag")
-        )
+        globalPostgresConfig?.let { DatabaseLogStorage(createDataSource(it)) }
+            ?: error("Please specify DBMS connection options using --storage dbms command line flag")
+
     }
 
     val ALL = listOf(IN_MEMORY, DBMS).toMap()
 }
 
+/**
+ * This is an in-memory implementation of the log storage.
+ */
 class InMemoryLogStorage : LogStorage {
-    private val log = org.slf4j.LoggerFactory.getLogger("Raft.LogStorage")
+    private val log = LoggerFactory.getLogger("Raft.LogStorage")
     private val entries = mutableListOf<LogEntry>()
 
+    init {
+        println("PLEASE IMPLEMENT A PERSISTENT LOG STORAGE IN DatabaseLogStorage.kt")
+    }
     override val lastCommittedEntryNum = ObservableProperty<LogEntryNumber>(LogEntryNumber.getDefaultInstance()).also {
         it.subscribe { oldValue, newValue ->
             if (newValue.compareTo(oldValue) < 0) {
@@ -120,20 +121,14 @@ class InMemoryLogStorage : LogStorage {
  * @param entries The list of log entries available in this view.
  * @param pos The current position in the list of entries.
  */
-internal class InMemoryLogIterator(private val entries: List<LogEntry>, private var pos: Int = entries.size) :
-    LogIterator {
-    override val lastCommittedEntry: LogEntryNumber = synchronized(entries) {
-        entries.lastOrNull()?.entryNumber ?: LogEntryNumber.getDefaultInstance()
-    }
-
+internal class InMemoryLogIterator(private val entries: List<LogEntry>, private var pos: Int = entries.size) : LogIterator {
     override fun get(): LogEntry? = synchronized(entries) {
         if (pos >= 0 && entries.size > pos) entries[pos] else null
     }
 
-    override fun advance(): Boolean {
+    override fun advance() {
         synchronized(entries) {
             if (pos < entries.size) pos++
-            return pos < entries.size
         }
     }
 
@@ -153,8 +148,11 @@ internal class InMemoryLogIterator(private val entries: List<LogEntry>, private 
     }
 }
 
+/**
+ * Commits a sem-open range of entries (firstEntry, lastEntry] and applies them to the storage.
+ */
 fun LogStorage.commitRange(storage: Storage, firstEntry: LogEntryNumber, lastEntry: LogEntryNumber): LogEntryNumber {
-    val log = LoggerFactory.getLogger("Raft.Follower.CommitLog")
+    val log = LoggerFactory.getLogger("Raft.LogStorage")
     var lastCommitted = firstEntry
     val commitView = this.createIterator()
 
