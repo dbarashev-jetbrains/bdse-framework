@@ -2,10 +2,11 @@ package kvas.node.raft
 
 import kvas.proto.leaderElectionRequest
 import kvas.proto.leaderElectionResponse
+import kvas.proto.raftAppendLogRequest
 import kvas.util.toNodeAddress
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.test.assertEquals
 
 class ElectionProtocolTest {
 
@@ -70,6 +71,10 @@ class ElectionProtocolTest {
                 this.voterTermNumber = 1
             }
         }
+        testSetup.clusterState.updateLeader(raftAppendLogRequest {
+            this.senderAddress = "127.0.0.1:9000"
+            this.termNumber = 1
+        })
         testSetup.clusterState.heartbeatTs.set(System.currentTimeMillis())
         val resp = testSetup.protocol.processElectionRequest(leaderElectionRequest {
             this.nodeAddress = "127.0.0.1:9000"
