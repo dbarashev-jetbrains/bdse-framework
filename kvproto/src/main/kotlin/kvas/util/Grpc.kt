@@ -105,7 +105,7 @@ class GrpcPoolImpl<Stub : AbstractBlockingStub<Stub>>(
 
 }
 
-fun LogEntryNumber.compareTo(other: LogEntryNumber) =
+operator fun LogEntryNumber.compareTo(other: LogEntryNumber) =
     (this.termNumber - other.termNumber).let {
         when {
             it < 0 -> -1

@@ -43,6 +43,11 @@ interface NodeState {
     var currentTerm: Int
 
     /**
+     * A candidate this node voted for in the current term.
+     */
+    var votedFor: NodeAddress?
+
+    /**
      * Represents the log storage for maintaining the replicated log entries on the node.
      */
     val logStorage: LogStorage
@@ -197,6 +202,8 @@ class NodeStateImpl(
                 error("New term $value is lower than current term ${_currentTerm.get()}")
             } else _currentTerm.set(value)
         }
+
+    override var votedFor: NodeAddress? = null
 
     override val raftRole = ObservableProperty(RaftRole.FOLLOWER)
 }

@@ -43,7 +43,7 @@ interface LogStorage {
  * Represents an iterator over a sequence of log entries. The iterator supports navigation through the log
  * entries and provides access to the entry at the specified position.
  */
-interface LogIterator {
+interface LogIterator: AutoCloseable {
     /**
      * Returns the log entry where iterator is positioned at.
      */
@@ -58,6 +58,8 @@ interface LogIterator {
      * Positions the iterator at the given entry.
      */
     fun positionAt(entry: LogEntryNumber)
+
+    override fun close() {}
 }
 
 /**

@@ -7,6 +7,7 @@ import kvas.proto.KvasReplicationProto.LogEntryNumber
 import kvas.proto.leaderElectionRequest
 import kvas.proto.leaderElectionResponse
 import kvas.util.NodeAddress
+import kvas.util.toNodeAddress
 import org.slf4j.LoggerFactory
 
 typealias LeaderElectionGrpc = (NodeAddress, LeaderElectionRequest) -> LeaderElectionResponse
@@ -174,6 +175,7 @@ class DemoElectionProtocol(
         }
         if (response.isGranted) {
             clusterState.clearLeader()
+            nodeState.votedFor = request.nodeAddress.toNodeAddress()
         }
         return response
     }
