@@ -8,6 +8,10 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import java.util.concurrent.atomic.AtomicInteger
 
+/**
+ * These tests are written for the DEMO election protocol. They are not necessary applicable to the real RAFT election
+ * protocol.
+ */
 class ElectionProtocolTest {
 
     data class TestSetup(val protocol: ElectionProtocol, val clusterState: ClusterStateImpl, val nodeState: NodeStateImpl)
