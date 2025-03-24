@@ -3,7 +3,6 @@ package kvas.node.storage
 import kvas.proto.KvasSharedProto.DataRow
 import java.util.concurrent.ConcurrentSkipListMap
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.Lock
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
@@ -12,7 +11,6 @@ class InMemoryStorage : Storage {
     private val lock = ReentrantReadWriteLock()
     private val readLock = lock.readLock()
     private val writeLock = lock.writeLock()
-    private var logicalTimestamp = AtomicLong(0)
     private val rowKey2timestamp = mutableMapOf<String, Long>()
 
     override fun put(rowKey: String, columnName: String, value: String) {
@@ -22,7 +20,7 @@ class InMemoryStorage : Storage {
         try {
             val recordKey = if (columnName.isEmpty()) rowKey else "$rowKey:$columnName"
             key2value[recordKey] = value
-            rowKey2timestamp[rowKey] = logicalTimestamp.incrementAndGet()
+            rowKey2timestamp[rowKey] = rowKey2timestamp.getOrDefault(rowKey, 0) + 1
         } finally {
             writeLock.unlock()
         }
