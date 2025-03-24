@@ -19,8 +19,8 @@ class StorageTest {
         assertEquals(
             listOf(
                 createStoredRow("1", mapOf("id" to "1", "name" to "Foo")).toBuilder().setVersion(2).build(),
-                createStoredRow("2", mapOf("id" to "2", "name" to "Bar")).toBuilder().setVersion(4).build(),
-                createStoredRow("3", mapOf(DEFAULT_COLUMN_NAME to "3")).toBuilder().setVersion(5).build()
+                createStoredRow("2", mapOf("id" to "2", "name" to "Bar")).toBuilder().setVersion(2).build(),
+                createStoredRow("3", mapOf(DEFAULT_COLUMN_NAME to "3")).toBuilder().setVersion(1).build()
             ), storage.scan().asSequence().toList()
         )
     }
@@ -47,14 +47,14 @@ class StorageTest {
         assertEquals(
             listOf(
                 createStoredRow("1", mapOf("id" to "1", "name" to "Foo")).toBuilder().setVersion(2).build(),
-                createStoredRow("2", mapOf("id" to "2", "name" to "Bar")).toBuilder().setVersion(4).build(),
-                createStoredRow("3", mapOf(DEFAULT_COLUMN_NAME to "3")).toBuilder().setVersion(5).build()
+                createStoredRow("2", mapOf("id" to "2", "name" to "Bar")).toBuilder().setVersion(2).build(),
+                createStoredRow("3", mapOf(DEFAULT_COLUMN_NAME to "3")).toBuilder().setVersion(1).build()
             ), rows
         )
         assertEquals(
             listOf(
                 createStoredRow("1", mapOf("id" to "1", "name" to "Foo")).toBuilder().setVersion(2).build(),
-                createStoredRow("3", mapOf(DEFAULT_COLUMN_NAME to "3")).toBuilder().setVersion(5).build()
+                createStoredRow("3", mapOf(DEFAULT_COLUMN_NAME to "3")).toBuilder().setVersion(1).build()
             ), storage.scan().asSequence().toList()
         )
     }
@@ -93,13 +93,13 @@ class StorageTest {
 
         assertEquals(
             listOf(
-                createStoredRow("2", mapOf("id" to "2", "name" to "Bar")).toBuilder().setVersion(4).build()
+                createStoredRow("2", mapOf("id" to "2", "name" to "Bar")).toBuilder().setVersion(2).build()
             ), storage.scan(mapOf(MetadataKeys.ROW_KEY_EQ.name to "2")).asSequence().toList()
         )
 
         assertEquals(
             listOf(
-                createStoredRow("3", mapOf(DEFAULT_COLUMN_NAME to "3")).toBuilder().setVersion(5).build()
+                createStoredRow("3", mapOf(DEFAULT_COLUMN_NAME to "3")).toBuilder().setVersion(1).build()
             ), storage.scan(mapOf(MetadataKeys.ROW_KEY_EQ.name to "3")).asSequence().toList()
         )
 
