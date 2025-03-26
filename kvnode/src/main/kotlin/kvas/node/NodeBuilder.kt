@@ -1,12 +1,14 @@
 package kvas.node
 
 import io.grpc.ServerBuilder
+import kvas.node.mapreduce.MapperImpl
 import kvas.node.replication.LeaderlessReplication
 import kvas.node.replication.LeaderlessReplicationDataServiceImpl
 import kvas.node.replication.ReplicationFollowers
 import kvas.node.replication.ReplicationLeaders
 import kvas.proto.KvasProto
 import kvas.setup.SingleShard
+import java.util.concurrent.Executors
 
 internal fun KvasNodeBuilder.buildReplicationNode(grpcBuilder: ServerBuilder<*>) {
     if (this.replicationConfig.role == "leaderless") {
@@ -68,6 +70,8 @@ internal fun KvasNodeBuilder.buildReplicationNode(grpcBuilder: ServerBuilder<*>)
 }
 
 internal fun KvasNodeBuilder.buildShardingNode(grpcBuilder: ServerBuilder<*>) {
+    grpcBuilder.addService(MapperImpl(this.storage, Executors.newSingleThreadExecutor()))
+
     val statisticsStorage = StatisticsStorage(this.createFailingStorage(this.storage))
     val dataService = KvasDataNode(
         selfAddress = this.selfAddress, storage = statisticsStorage,
