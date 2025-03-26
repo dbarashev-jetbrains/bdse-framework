@@ -1,6 +1,7 @@
 plugins {
     id 'java'
     id 'org.jetbrains.kotlin.jvm' apply true
+    id 'org.jetbrains.kotlin.plugin.serialization' version '2.1.20'
     id 'application'
     id 'com.google.cloud.tools.jib' version "3.4.4"
 }
@@ -11,6 +12,9 @@ dependencies {
     implementation project(':kvproto')
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.7.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.8.0'
+
     implementation "io.grpc:grpc-core:$grpcVersion"
     implementation "io.grpc:grpc-protobuf:$grpcVersion"
     implementation "io.grpc:grpc-kotlin-stub:1.4.1"
@@ -20,7 +24,10 @@ dependencies {
     implementation "org.postgresql:postgresql:$postgresqlVersion"
     implementation "com.github.ajalt.clikt:clikt:$clicktVersion"
 
+    implementation "org.jetbrains.kotlin:kotlin-script-runtime:$kotlinVersion"
+    runtimeOnly "org.jetbrains.kotlin:kotlin-scripting-jsr223:$kotlinVersion"
     testImplementation "io.grpc:grpc-inprocess:$grpcVersion"
+    testImplementation "org.jetbrains.kotlin:kotlin-test:2.0.21"
 }
 
 mainClassName = 'kvas.node.MainKt'
@@ -33,11 +40,12 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
 
 jib {
     to {
-        image = "ghcr.io/bdse-class-2024/kvnode:${System.env.BRANCH_NAME}"
-        auth {
-            username = 'USERNAME'
-            password = "${System.env.CR_PAT}"
-        }
+        image = "kvnode"
+//        image = "ghcr.io/bdse-class-2024/kvnode:${System.env.BRANCH_NAME}"
+//        auth {
+//            username = 'USERNAME'
+//            password = "${System.env.CR_PAT}"
+//        }
     }
 
     container {

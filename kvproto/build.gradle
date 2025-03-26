@@ -7,6 +7,7 @@ buildscript {      // Configuration for building
 plugins {
     id 'java'
     id 'org.jetbrains.kotlin.jvm' apply true
+    id 'org.jetbrains.kotlin.plugin.serialization' version '2.1.20'
 }
 
 apply plugin: 'com.google.protobuf'
@@ -17,6 +18,7 @@ dependencies {
     implementation "com.google.protobuf:protobuf-java-util:$protobufVersion"
     api "com.google.protobuf:protobuf-kotlin:$protobufVersion"
     api "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.8.1"
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.8.0'
     implementation "io.grpc:grpc-api:$grpcVersion"
     implementation "io.grpc:grpc-protobuf:$grpcVersion"
     implementation "io.grpc:grpc-kotlin-stub:1.4.1"
