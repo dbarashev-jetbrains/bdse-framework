@@ -20,6 +20,16 @@ interface Mapper {
     fun getMapOutputShard(reducerAddress: NodeAddress): Flow<DataRow>
 }
 
+class DemoMapperImpl: Mapper {
+    override fun writeMapOutput(key: String, value: Any?) {
+        TODO("Not yet implemented")
+    }
+
+    override fun getMapOutputShard(reducerAddress: NodeAddress): Flow<DataRow> {
+        TODO("Not yet implemented")
+    }
+
+}
 class MapperImpl(
     private val selfAddress: NodeAddress,
     private val storage: Storage,
