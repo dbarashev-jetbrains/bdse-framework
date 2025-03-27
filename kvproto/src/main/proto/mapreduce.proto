@@ -4,6 +4,7 @@ option java_package = "kvas.proto";
 option java_outer_classname = "MapperProto";
 import "google/protobuf/wrappers.proto";
 import "metadata.proto";
+import "shared.proto";
 
 message StartMapRequest {
   string map_function = 1;
@@ -13,6 +14,29 @@ message StartMapRequest {
 message StartMapResponse {
 }
 
+message GetMapOutputShardRequest {
+  string reducer_address = 1;
+}
+
 service Mapper {
   rpc StartMap(StartMapRequest) returns (StartMapResponse);
+  rpc GetMapOutputShard(GetMapOutputShardRequest) returns (stream DataRow);
+}
+
+message AddMapOutputShardRequest {
+  string mapper_address = 1;
+}
+
+message AddMapOutputShardResponse{}
+
+message StartReduceRequest {
+  string reduce_function = 1;
+  ClusterMetadata metadata = 2;
+}
+
+message StartReduceResponse{}
+
+service Reducer {
+  rpc StartReduce(StartReduceRequest) returns (StartReduceResponse);
+  rpc AddMapOutputShard(AddMapOutputShardRequest) returns (AddMapOutputShardResponse);
 }
