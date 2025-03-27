@@ -1,0 +1,18 @@
+// PLEASE DON'T EDIT THIS FILE
+syntax = "proto3";
+option java_package = "kvas.proto";
+option java_outer_classname = "MapperProto";
+import "google/protobuf/wrappers.proto";
+import "metadata.proto";
+
+message StartMapRequest {
+  string map_function = 1;
+  ClusterMetadata metadata = 2;
+}
+
+message StartMapResponse {
+}
+
+service Mapper {
+  rpc StartMap(StartMapRequest) returns (StartMapResponse);
+}
