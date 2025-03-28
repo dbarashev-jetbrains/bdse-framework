@@ -11,9 +11,14 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.choice
+import com.github.ajalt.clikt.parameters.types.file
 import com.github.ajalt.clikt.parameters.types.int
 import io.grpc.ManagedChannelBuilder
 import io.grpc.ServerBuilder
+import kvas.node.mapreduce.MapDrivers
+import kvas.node.mapreduce.MapperImpl
+import kvas.node.mapreduce.ReduceDrivers
+import kvas.node.mapreduce.ReducerImpl
 import kvas.node.raft.*
 import kvas.node.storage.*
 import kvas.proto.KvasMetadataProto.NodeInfo
@@ -27,6 +32,8 @@ import kvas.setup.Sharding
 import kvas.util.NodeAddress
 import kvas.util.toNodeAddress
 import org.slf4j.LoggerFactory
+import java.io.File
+import java.util.concurrent.Executors
 
 internal class ShardingChangeRecipient(private val address: NodeAddress) : AutoCloseable {
     val channel = ManagedChannelBuilder.forAddress(address.host, address.port).usePlaintext().build()
@@ -40,6 +47,7 @@ internal class ShardingChangeRecipient(private val address: NodeAddress) : AutoC
  * Builder class for configuring and initializing a KvasNode with storage, sharding, and metadata services.
  */
 internal class KvasNodeBuilder {
+    var mapReduceConfig = MapReduceConfig(MapDrivers.DEMO.first)
     var raftConfig: RaftConfig = RaftConfig(
         ElectionProtocols.DEMO.first,
         RaftLeaders.DEMO.first,
@@ -102,10 +110,25 @@ internal class KvasNodeBuilder {
         } else {
             this.buildShardingNode(grpcBuilder)
         }
+
+        if (mapReduceConfig.isConfigured) {
+            addMapReduceServices(grpcBuilder)
+        }
         grpcBuilder.addService(MetadataListenerImpl { shardingChangeRequest ->
             metadataListeners.forEach { it.invoke(shardingChangeRequest.metadata) }
         })
         grpcBuilder.addService(OutageEmulatorServiceImpl(selfAddress, clusterOutageState))
+    }
+
+    private fun addMapReduceServices(grpcBuilder: ServerBuilder<*>) {
+        val mapDriver = MapDrivers.ALL[mapReduceConfig.drivers]?.let { driverFactory ->
+            driverFactory(this.storage, this.sharding)
+        }
+        val reduceDriver = ReduceDrivers.ALL[mapReduceConfig.drivers]?.let { driverFactory ->
+            driverFactory(this.storage, this.storage)
+        }
+        grpcBuilder.addService(MapperImpl(selfAddress, storage, mapDriver!!, Executors.newSingleThreadExecutor()))
+        grpcBuilder.addService(ReducerImpl(selfAddress, storage, reduceDriver!!, Executors.newCachedThreadPool()))
     }
 
     fun addRaftServices(grpcBuilder: ServerBuilder<*>) {
@@ -141,6 +164,7 @@ Running on ${selfAddress}
 * ${sharding}
 * ${replicationConfig}
 * ${raftConfig}
+* ${mapReduceConfig}
         """.trimIndent()
     }
 }
@@ -289,6 +313,30 @@ internal class Raft : ChainedCliktCommand<KvasNodeBuilder>() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Commands and flags related to Map-Reduce
+class MapReduceConfig(var drivers: String) {
+    var isConfigured: Boolean = false
+    override fun toString(): String {
+        return "MapReduce: drivers=$drivers"
+    }
+}
+
+internal class MapReduce : ChainedCliktCommand<KvasNodeBuilder>("mapreduce") {
+    val drivers by option("--impl").choice(*MapDrivers.ALL.keys.toTypedArray()).default(MapDrivers.DEMO.first)
+
+    init {
+        context {
+            helpFormatter = { MordantHelpFormatter(it, showDefaultValues = true) }
+        }
+    }
+    override fun run(value: KvasNodeBuilder): KvasNodeBuilder {
+        value.mapReduceConfig.drivers = drivers
+        value.mapReduceConfig.isConfigured = true
+        return value
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Other options
 internal class Main : ChainedCliktCommand<KvasNodeBuilder>() {
     override val allowMultipleSubcommands: Boolean = true
@@ -337,7 +385,7 @@ internal class Main : ChainedCliktCommand<KvasNodeBuilder>() {
  */
 fun main(args: Array<String>) {
     val command = Main()
-    command.subcommands(Metadata(), Replication(), Failures(), Raft())
+    command.subcommands(Metadata(), Replication(), Failures(), Raft(), MapReduce())
     val kvasBuilder = command.main(args, KvasNodeBuilder())
     println(kvasBuilder)
     ServerBuilder.forPort(kvasBuilder.grpcPort).let {

@@ -1,10 +1,15 @@
 package kvas.node.mapreduce
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
+import kvas.node.storage.DEFAULT_COLUMN_NAME
 import kvas.node.storage.Storage
 import kvas.proto.*
+import kvas.proto.KvasMetadataProto.ClusterMetadata
 import kvas.proto.KvasSharedProto.DataRow
+import kvas.setup.Sharding
 import kvas.util.AnySerializer
 import kvas.util.GrpcPoolImpl
 import kvas.util.NodeAddress
@@ -15,25 +20,43 @@ import javax.script.ScriptEngineManager
 
 typealias MapperOutput = List<Pair<String, Any?>>
 
-interface Mapper {
+interface MapDriver {
+    var metadata: ClusterMetadata
     fun writeMapOutput(key: String, value: Any?)
     fun getMapOutputShard(reducerAddress: NodeAddress): Flow<DataRow>
 }
 
-class DemoMapperImpl: Mapper {
+class DemoMapDriver(private val storage: Storage, private val sharding: Sharding): MapDriver {
+    override var metadata: ClusterMetadata = clusterMetadata { }
+
     override fun writeMapOutput(key: String, value: Any?) {
-        TODO("Not yet implemented")
+        val json = Json { ignoreUnknownKeys = true }
+        val jsonValue = json.encodeToString(AnySerializer, value)
+        storage.put(key, columnName = DEFAULT_COLUMN_NAME, jsonValue)
     }
 
     override fun getMapOutputShard(reducerAddress: NodeAddress): Flow<DataRow> {
-        TODO("Not yet implemented")
+        return storage.scan().use {
+            it.asFlow().map { DataRow.newBuilder().setKey(it.key).putAllValues(it.valuesMap).build() }
+        }
     }
-
 }
+
+typealias MapDriverFactory = (Storage, Sharding) -> MapDriver
+typealias MapDriverProvider = Pair<String, MapDriverFactory>
+
+object MapDrivers {
+    val DEMO: MapDriverProvider = "demo" to ::DemoMapDriver
+    val REAL: MapDriverProvider = "real" to { _: Storage, _: Sharding ->
+        TODO("Create your real reduce driver here")
+    }
+    val ALL = listOf(DEMO, REAL).toMap()
+}
+
 class MapperImpl(
     private val selfAddress: NodeAddress,
     private val storage: Storage,
-    private val mapper: Mapper,
+    private val mapDriver: MapDriver,
     private val executor: Executor) : MapperGrpcKt.MapperCoroutineImplBase() {
     private val scriptEngine = ScriptEngineManager().getEngineByExtension("kts")
     private val reducerGrpcPool = GrpcPoolImpl<ReducerGrpc.ReducerBlockingStub>(selfAddress) {
@@ -41,11 +64,8 @@ class MapperImpl(
     }
 
     override suspend fun startMap(request: MapperProto.StartMapRequest): MapperProto.StartMapResponse {
-        val script = """
-            fun mapper(rowKey: String, values: Map<String, String>): List<Pair<String, Any?>> { 
-              return values[""]?.split(" ")?.map { it to 1 }?.toList() ?: emptyList()
-            }
-        """.trimIndent()
+        mapDriver.metadata = request.metadata
+        val script = request.mapFunction
         scriptEngine.eval(script)
         val inv = scriptEngine as Invocable
         executor.execute {
@@ -54,7 +74,7 @@ class MapperImpl(
                 scan.forEach { row ->
                     val result = inv.invokeFunction("mapper", row.key, row.valuesMap)
                     (result as? MapperOutput)?.forEach { (key, value) ->
-                        mapper.writeMapOutput(key, value)
+                        mapDriver.writeMapOutput(key, value)
                     }
                 }
             }
@@ -71,32 +91,7 @@ class MapperImpl(
     }
 
     override fun getMapOutputShard(request: MapperProto.GetMapOutputShardRequest): Flow<DataRow> {
-        return mapper.getMapOutputShard(request.reducerAddress.toNodeAddress())
-    }
-
-    private fun writeMapOutput(key: String, value: Any?) {
-        val json = Json { ignoreUnknownKeys = true }
-        val jsonValue = json.encodeToString(AnySerializer, value)
-        println("MAPPER OUTPUT: $key -> $jsonValue")
+        return mapDriver.getMapOutputShard(request.reducerAddress.toNodeAddress())
     }
 }
 
-class ReducerImpl(
-    private val selfAddress: NodeAddress,
-    private val storage: Storage): ReducerGrpcKt.ReducerCoroutineImplBase() {
-
-    private var reduceRequest: MapperProto.StartReduceRequest = startReduceRequest {  }
-    private val scriptEngine = ScriptEngineManager().getEngineByExtension("kts")
-    private val mapperGrpcPool = GrpcPoolImpl<MapperGrpc.MapperBlockingStub>(selfAddress) {
-            channel -> MapperGrpc.newBlockingStub(channel)
-    }
-
-    override suspend fun startReduce(request: MapperProto.StartReduceRequest): MapperProto.StartReduceResponse {
-        reduceRequest = request
-        return startReduceResponse {  }
-    }
-
-    override suspend fun addMapOutputShard(request: MapperProto.AddMapOutputShardRequest): MapperProto.AddMapOutputShardResponse {
-        return super.addMapOutputShard(request)
-    }
-}

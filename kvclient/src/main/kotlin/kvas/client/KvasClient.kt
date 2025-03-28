@@ -31,7 +31,7 @@ class KvasClient(
 ) {
     private val metadataStub = metadataStubFactory(metadataAddress)
     private val nodeStubs = mutableMapOf<String, DataServiceGrpc.DataServiceBlockingStub>()
-    private var metadata = clusterMetadata { }
+    var metadata = clusterMetadata { }
 
     init {
         updateMetadata()

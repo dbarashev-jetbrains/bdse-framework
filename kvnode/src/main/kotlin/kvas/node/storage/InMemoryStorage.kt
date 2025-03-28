@@ -62,7 +62,7 @@ class InMemoryStorage : Storage {
     override val supportedFeatures: Map<String, String>
         get() = mapOf(
             MetadataKeys.ROW_KEY_EQ.name to "Scan will return only one row with the given key",
-            MetadataKeys.LOGICAL_TIMESTAMP.name to "A single per-storage timestamp is incremented on each write"
+            MetadataKeys.LOGICAL_TIMESTAMP.name to "A single per-row timestamp is incremented on each write"
         )
 
     override fun toString() = "In-memory storage"
