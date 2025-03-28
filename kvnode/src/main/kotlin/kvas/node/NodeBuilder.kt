@@ -1,7 +1,7 @@
 package kvas.node
 
 import io.grpc.ServerBuilder
-import kvas.node.mapreduce.DemoMapperImpl
+import kvas.node.mapreduce.DemoMapDriver
 import kvas.node.mapreduce.MapperImpl
 import kvas.node.replication.LeaderlessReplication
 import kvas.node.replication.LeaderlessReplicationDataServiceImpl
@@ -71,8 +71,6 @@ internal fun KvasNodeBuilder.buildReplicationNode(grpcBuilder: ServerBuilder<*>)
 }
 
 internal fun KvasNodeBuilder.buildShardingNode(grpcBuilder: ServerBuilder<*>) {
-    grpcBuilder.addService(MapperImpl(this.selfAddress, this.storage, DemoMapperImpl(), Executors.newSingleThreadExecutor()))
-
     val statisticsStorage = StatisticsStorage(this.createFailingStorage(this.storage))
     val dataService = KvasDataNode(
         selfAddress = this.selfAddress, storage = statisticsStorage,

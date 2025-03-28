@@ -4,15 +4,17 @@ import com.github.ajalt.clikt.core.*
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.choice
+import com.github.ajalt.clikt.parameters.types.file
 import com.github.ajalt.clikt.parameters.types.int
 import io.grpc.ManagedChannelBuilder
-import kvas.proto.DataServiceGrpc
-import kvas.proto.MetadataServiceGrpc
-import kvas.proto.OutageEmulatorServiceGrpc
-import kvas.proto.StatisticsGrpc
+import kvas.proto.*
+import kvas.proto.MapperGrpc.MapperBlockingStub
 import kvas.setup.AllShardings
 import kvas.setup.NotImplementedSharding
+import kvas.util.GrpcPoolImpl
+import kvas.util.NodeAddress
 import kvas.util.toNodeAddress
 
 /**
@@ -185,10 +187,44 @@ class LoadTestCommand : CliktCommand(name = "loadtest") {
     }
 }
 
+class MapReduce : CliktCommand(name = "mapreduce") {
+    val kvasClientFactory by requireObject<() -> KvasClient>()
+    val script by option().file(mustExist = true, canBeDir = false).required()
+
+    override fun run() {
+        val kvasClient = kvasClientFactory()
+        val mapGrpcPool = GrpcPoolImpl<MapperBlockingStub>(NodeAddress("localhost", 0)) { channel ->
+            MapperGrpc.newBlockingStub(channel)
+
+        }
+        val reduceGrpcPool = GrpcPoolImpl<ReducerGrpc.ReducerBlockingStub>(NodeAddress("localhost", 0)) { channel ->
+            ReducerGrpc.newBlockingStub(channel)
+        }
+        kvasClient.metadata.shardsList.map { it.leader }.forEach {
+            reduceGrpcPool.rpc(it.nodeAddress.toNodeAddress()) {
+                startReduce(startReduceRequest {
+                    this.metadata = kvasClient.metadata
+                    this.reduceFunction = script.readText()
+                })
+            }
+        }
+        kvasClient.metadata.shardsList.map { it.leader }.forEach {
+            mapGrpcPool.rpc(it.nodeAddress.toNodeAddress()) {
+                startMap(startMapRequest {
+                    this.metadata = kvasClient.metadata
+                    this.mapFunction = script.readText()
+                })
+            }
+        }
+    }
+
+
+}
+
 private fun String.toWriteNodeSelector() = when (this) {
     "leader" -> LEADER_NODE_SELECTOR
     "random" -> RANDOM_NODE_SELECTOR
     else -> throw IllegalArgumentException("Unknown write node selector: $this")
 }
 
-fun main(args: Array<String>) = Main().subcommands(Get(), Put(), Shell(), LoadTestCommand()).main(args)
+fun main(args: Array<String>) = Main().subcommands(Get(), Put(), Shell(), LoadTestCommand(), MapReduce()).main(args)
