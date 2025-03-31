@@ -21,6 +21,7 @@ class LoadTest(
     private val workload: Workload,
     private val keyCount: Int,
     private val clientCount: Int,
+    private val randomValues: Boolean,
     private val backendFactory: BackendFactory
 ) {
 
@@ -32,7 +33,7 @@ class LoadTest(
         LOG.info("LOAD TEST: started")
         val jobs = mutableListOf<Deferred<BackendStats>>()
         val results = mutableListOf<BackendStats>()
-        val sourceChannel = produceScope.generateLoad(keyCount)
+        val sourceChannel = produceScope.generateLoad(randomValues, keyCount)
         val updateTime = measureTime {
             runBlocking {
                 repeat(clientCount) {
@@ -125,11 +126,11 @@ class LoadTest(
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun CoroutineScope.generateLoad(keyCount: Int, keyProducer: (Int) -> Int = { it }): ReceiveChannel<Payload> {
+private fun CoroutineScope.generateLoad(randomValues: Boolean, keyCount: Int, keyProducer: (Int) -> Int = { it }): ReceiveChannel<Payload> {
     return produce(capacity = keyCount / 2) {
         (1..keyCount).forEach {
             val key = "${keyProducer(it)}"
-            val value = "val $key"
+            val value = if (randomValues) generateRandomPhrase() else "val $key"
             send(Payload(key, value))
         }
         this.close()

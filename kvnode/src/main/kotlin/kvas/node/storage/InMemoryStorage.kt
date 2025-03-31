@@ -56,7 +56,11 @@ class InMemoryStorage : Storage {
             InMemoryRowScan(readLock, key2value.tailMap(rowKey), rowKey2timestamp) {
                 it != rowKey
             }
-        } ?: InMemoryRowScan(readLock, key2value, rowKey2timestamp)
+        } ?: InMemoryRowScan(readLock, key2value, rowKey2timestamp).also {
+//            println("------ SCAN ------------")
+//            println(key2value)
+//            println("------ ---- ------------")
+        }
     }
 
     override val supportedFeatures: Map<String, String>

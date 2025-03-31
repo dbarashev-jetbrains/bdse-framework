@@ -69,6 +69,7 @@ internal class KvasNodeBuilder {
                     .usePlaintext().build())
         }
     var storage: Storage = InMemoryStorage()
+    var storageFactory: ()->Storage = { InMemoryStorage() }
     var sharding: Sharding = NaiveSharding
     var dataTransferServiceImpl: String = DataTransferProtocols.DEMO.first
     var replicationConfig: ReplicationConfig = ReplicationConfig(role = "leader", impl = "void")
@@ -121,11 +122,12 @@ internal class KvasNodeBuilder {
     }
 
     private fun addMapReduceServices(grpcBuilder: ServerBuilder<*>) {
+        val mapOutputStorage = this.storageFactory()
         val mapDriver = MapDrivers.ALL[mapReduceConfig.drivers]?.let { driverFactory ->
-            driverFactory(this.storage, this.sharding)
+            driverFactory(mapOutputStorage, this.sharding)
         }
         val reduceDriver = ReduceDrivers.ALL[mapReduceConfig.drivers]?.let { driverFactory ->
-            driverFactory(this.storage, this.storage)
+            driverFactory(this.storageFactory(), this.storageFactory())
         }
         grpcBuilder.addService(MapperImpl(selfAddress, storage, mapDriver!!, Executors.newSingleThreadExecutor()))
         grpcBuilder.addService(ReducerImpl(selfAddress, storage, reduceDriver!!, Executors.newCachedThreadPool()))
@@ -367,9 +369,12 @@ internal class Main : ChainedCliktCommand<KvasNodeBuilder>() {
             is PostgresConfig -> {
                 globalPostgresConfig = it
                 kvasNodeBuilder.storage = DatabaseStorage(createDataSource(it), it)
+                kvasNodeBuilder.storageFactory = { DatabaseStorage(createDataSource(it), it) }
             }
 
-            is MemoryConfig -> {}
+            is MemoryConfig -> {
+                kvasNodeBuilder.storageFactory = { InMemoryStorage() }
+            }
         }
 
         kvasNodeBuilder.sharding = AllShardings.ALL[shardingConfig] ?: NotImplementedSharding
