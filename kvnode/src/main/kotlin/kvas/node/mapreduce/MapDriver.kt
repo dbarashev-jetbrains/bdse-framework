@@ -11,6 +11,7 @@ import kvas.proto.KvasMetadataProto.ClusterMetadata
 import kvas.proto.KvasSharedProto.DataRow
 import kvas.setup.Sharding
 import kvas.util.AnySerializer
+import kvas.util.GrpcPool
 import kvas.util.GrpcPoolImpl
 import kvas.util.NodeAddress
 import kvas.util.toNodeAddress
@@ -58,11 +59,15 @@ class MapperImpl(
     private val selfAddress: NodeAddress,
     private val storage: Storage,
     private val mapDriver: MapDriver,
-    private val executor: Executor) : MapperGrpcKt.MapperCoroutineImplBase() {
+    private val executor: Executor,
+    private val grpcAddMapOutputShard: ((NodeAddress, MapperProto.AddMapOutputShardRequest)-> MapperProto.AddMapOutputShardResponse)? = null
+
+    ) : MapperGrpcKt.MapperCoroutineImplBase() {
     private val scriptEngine = ScriptEngineManager().getEngineByExtension("kts")
-    private val reducerGrpcPool = GrpcPoolImpl<ReducerGrpc.ReducerBlockingStub>(selfAddress) {
-            channel -> ReducerGrpc.newBlockingStub(channel)
-    }
+    private val reducerGrpcPool: GrpcPool<ReducerGrpc.ReducerBlockingStub> =
+        GrpcPoolImpl<ReducerGrpc.ReducerBlockingStub>(selfAddress) { channel ->
+            ReducerGrpc.newBlockingStub(channel)
+        }
 
     override suspend fun startMap(request: MapperProto.StartMapRequest): MapperProto.StartMapResponse = try {
         mapDriver.metadata = request.metadata
@@ -81,11 +86,14 @@ class MapperImpl(
             }
             println("MAPPER FINISHED")
             request.metadata.shardsList.forEach { shard ->
-                reducerGrpcPool.rpc(shard.leader.nodeAddress.toNodeAddress()) {
-                    addMapOutputShard(addMapOutputShardRequest {
-                        mapperAddress = selfAddress.toString()
-                    })
+                val leaderAddress = shard.leader.nodeAddress.toNodeAddress()
+                val request = addMapOutputShardRequest {
+                    mapperAddress = selfAddress.toString()
                 }
+                grpcAddMapOutputShard?.invoke(leaderAddress, request)
+                    ?: reducerGrpcPool.rpc(shard.leader.nodeAddress.toNodeAddress()) {
+                        addMapOutputShard(request)
+                    }
             }
         }
         startMapResponse {}
