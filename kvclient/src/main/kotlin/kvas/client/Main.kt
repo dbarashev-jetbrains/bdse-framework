@@ -3,6 +3,7 @@ package kvas.client
 import com.github.ajalt.clikt.core.*
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.choice
@@ -174,9 +175,10 @@ class LoadTestCommand : CliktCommand(name = "loadtest") {
     val clientCount by option().int().default(1)
     val workload by option().choice("READONLY", "MIXED").default("MIXED")
     val writeNode by option().choice("leader", "random", "raft").default("leader")
+    val randomValues by option().flag()
 
     override fun run() {
-        val loadTest = LoadTest(Workload.valueOf(workload), keyCount, clientCount) {
+        val loadTest = LoadTest(Workload.valueOf(workload), keyCount, clientCount, randomValues) {
             KvasBackend(kvasClientFactory(), writeNode.toWriteNodeSelector())
         }
         loadTest.generateWorkload()
@@ -201,6 +203,7 @@ class MapReduce : CliktCommand(name = "mapreduce") {
             ReducerGrpc.newBlockingStub(channel)
         }
         kvasClient.metadata.shardsList.map { it.leader }.forEach {
+            println("Sending reduce job to ${it}")
             reduceGrpcPool.rpc(it.nodeAddress.toNodeAddress()) {
                 startReduce(startReduceRequest {
                     this.metadata = kvasClient.metadata
@@ -209,6 +212,7 @@ class MapReduce : CliktCommand(name = "mapreduce") {
             }
         }
         kvasClient.metadata.shardsList.map { it.leader }.forEach {
+            println("Sending map job to ${it}")
             mapGrpcPool.rpc(it.nodeAddress.toNodeAddress()) {
                 startMap(startMapRequest {
                     this.metadata = kvasClient.metadata

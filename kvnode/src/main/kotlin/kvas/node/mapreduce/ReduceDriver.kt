@@ -4,12 +4,11 @@ import kotlinx.serialization.json.Json
 import kvas.node.storage.DEFAULT_COLUMN_NAME
 import kvas.node.storage.Storage
 import kvas.proto.*
-import kvas.proto.KvasMetadataProto.ClusterMetadata
-import kvas.setup.Sharding
 import kvas.util.GrpcPoolImpl
 import kvas.util.NodeAddress
 import kvas.util.toNodeAddress
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import javax.script.Invocable
 import javax.script.ScriptEngineManager
 
@@ -22,9 +21,11 @@ interface ReduceDriver {
     fun forEachReduceTask(reduceTaskFn: ReduceTaskFn)
 }
 
+typealias ReduceDriverFactory = (Storage, Storage) -> ReduceDriver
+typealias ReduceDriverProvider = Pair<String, ReduceDriverFactory>
 object ReduceDrivers {
-    val DEMO = "demo" to ::DemoReduceDriver
-    val REAL = "real" to { _: Storage, _: Storage ->
+    val DEMO: ReduceDriverProvider = "demo" to ::DemoReduceDriver
+    val REAL: ReduceDriverProvider = "real" to { _: Storage, _: Storage ->
         TODO("Create your real reduce driver here")
     }
     val ALL = listOf(DEMO, REAL).toMap()
@@ -34,38 +35,33 @@ class DemoReduceDriver(private val inputStorage: Storage, private val outputStor
     override fun writeReduceInput(key: String, value: String) {
         val valueCount = inputStorage.get(key, "valueCount")?.toInt() ?: 0
         inputStorage.put(key, "valueCount", (valueCount + 1).toString())
-        inputStorage.put("$key:$valueCount", DEFAULT_COLUMN_NAME, value)
+        inputStorage.put(key, "value$valueCount", value)
     }
 
     override fun writeReduceOutput(key: String, value: Any) {
-        println("writeReduceOutput($key, $value)")
+        outputStorage.put(key, DEFAULT_COLUMN_NAME, "$value")
     }
 
     override fun forEachReduceTask(reduceTaskFn: ReduceTaskFn) {
         inputStorage.scan().use { scan ->
-            var key: String? = null
-            var counter = 0
-            var totalValues = 0
-            val values = mutableListOf<String>()
             scan.forEach { row ->
-                if (key == null) {
-                    key = row.key
-                    totalValues = row.valuesMap["valueCount"]?.toInt() ?: error("I expect the value count to be set")
-                } else if ("$key:$counter" == row.key) {
-                    values.add(row.valuesMap[DEFAULT_COLUMN_NAME] ?: "")
-                    counter++
-                } else {
-                    if (counter != totalValues) {
-                        error("Expected: counter==$totalValues, actual: $counter=$counter, totalValues=$totalValues, key=$key, current row: $row")
-                    }
-                    reduceTaskFn(key!!, values)
+                val values = mutableListOf<String>()
+                var totalValues = row.valuesMap["valueCount"]?.toInt() ?: error("I expect the value count to be set. row=$row")
+                (0 until totalValues).forEach {
+                    values.add(row.valuesMap["value$it"] ?: error("I expect the value to be set"))
                 }
+                reduceTaskFn(row.key, values)
             }
-
+        }
+        println("REDUCE OUTPUT:")
+        outputStorage.scan().use { scan ->
+            scan.forEach { row ->
+                println("${row.key} -> ${row.valuesMap[DEFAULT_COLUMN_NAME]}")
+            }
         }
     }
-
 }
+
 class ReducerImpl(
     private val selfAddress: NodeAddress,
     private val storage: Storage,
@@ -73,6 +69,7 @@ class ReducerImpl(
     private val shardTransferExecutor: Executor
 ): ReducerGrpcKt.ReducerCoroutineImplBase() {
 
+    private val reduceExecutor = Executors.newSingleThreadExecutor()
     private var reduceRequest: MapperProto.StartReduceRequest = startReduceRequest {  }
     private val scriptEngine = ScriptEngineManager().getEngineByExtension("kts")
     private val mapperGrpcPool = GrpcPoolImpl<MapperGrpc.MapperBlockingStub>(selfAddress) {
@@ -87,6 +84,7 @@ class ReducerImpl(
 
     override suspend fun addMapOutputShard(request: MapperProto.AddMapOutputShardRequest): MapperProto.AddMapOutputShardResponse {
         shardTransferExecutor.execute {
+            println("Transferring map output from ${request.mapperAddress}")
             mapperGrpcPool.rpc(request.mapperAddress.toNodeAddress()) {
                 getMapOutputShard(getMapOutputShardRequest {
                     this.reducerAddress = selfAddress.toString()
@@ -94,6 +92,7 @@ class ReducerImpl(
                     reduceDriver.writeReduceInput(dataRow.key, dataRow.valuesMap[DEFAULT_COLUMN_NAME] ?: "")
                 }
             }
+            println("...done")
             availableMapOutputShards.add(request.mapperAddress)
             if (availableMapOutputShards.size == reduceRequest.metadata.shardsCount) {
                 executeReduce()
@@ -103,13 +102,17 @@ class ReducerImpl(
     }
 
     private fun executeReduce() {
-        val json = Json { ignoreUnknownKeys = true }
-        reduceDriver.forEachReduceTask { key, values ->
-            val jsonValues = values.map { json.parseToJsonElement(it) }.toList()
+        reduceExecutor.execute {
+            println("REDUCE STARTED")
             scriptEngine.eval(reduceRequest.reduceFunction)
             val inv = scriptEngine as Invocable
-            val result = inv.invokeFunction("reducer", key, jsonValues)
-            reduceDriver.writeReduceOutput(key, result)
+            val json = Json { ignoreUnknownKeys = true }
+            reduceDriver.forEachReduceTask { key, values ->
+                val jsonValues = values.map { json.parseToJsonElement(it) }.toList()
+                val result = inv.invokeFunction("reducer", key, jsonValues)
+                reduceDriver.writeReduceOutput(key, result)
+            }
+            println("REDUCE FINISHED")
         }
     }
 }

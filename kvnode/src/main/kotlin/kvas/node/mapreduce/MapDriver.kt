@@ -14,6 +14,7 @@ import kvas.util.AnySerializer
 import kvas.util.GrpcPoolImpl
 import kvas.util.NodeAddress
 import kvas.util.toNodeAddress
+import org.slf4j.LoggerFactory
 import java.util.concurrent.Executor
 import javax.script.Invocable
 import javax.script.ScriptEngineManager
@@ -63,7 +64,7 @@ class MapperImpl(
             channel -> ReducerGrpc.newBlockingStub(channel)
     }
 
-    override suspend fun startMap(request: MapperProto.StartMapRequest): MapperProto.StartMapResponse {
+    override suspend fun startMap(request: MapperProto.StartMapRequest): MapperProto.StartMapResponse = try {
         mapDriver.metadata = request.metadata
         val script = request.mapFunction
         scriptEngine.eval(script)
@@ -87,7 +88,12 @@ class MapperImpl(
                 }
             }
         }
-        return startMapResponse {}
+        startMapResponse {}
+    } catch (ex: Exception) {
+        LOG.error("""Failed to start map
+            |{}
+        """.trimMargin(), request, ex)
+        throw ex
     }
 
     override fun getMapOutputShard(request: MapperProto.GetMapOutputShardRequest): Flow<DataRow> {
@@ -95,3 +101,4 @@ class MapperImpl(
     }
 }
 
+private val LOG = LoggerFactory.getLogger("Node.Map")
