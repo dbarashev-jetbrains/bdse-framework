@@ -62,12 +62,6 @@ internal class KvasNodeBuilder {
         }
     var selfAddress: NodeAddress = NodeAddress("localhost", 9000)
     var metadataConfig: MetadataConfig = MetadataConfig(isMaster = true, masterAddress = selfAddress)
-        set(value) {
-            field = value
-            metadataStub = MetadataServiceGrpc.newBlockingStub(
-                ManagedChannelBuilder.forAddress(metadataConfig.masterAddress.host, metadataConfig.masterAddress.port)
-                    .usePlaintext().build())
-        }
     var storage: Storage = InMemoryStorage()
     var storageFactory: ()->Storage = { InMemoryStorage() }
     var sharding: Sharding = NaiveSharding
@@ -75,10 +69,12 @@ internal class KvasNodeBuilder {
     var replicationConfig: ReplicationConfig = ReplicationConfig(role = "leader", impl = "void")
     val metadataListeners = mutableListOf<OnMetadataChange>()
     val clusterOutageState = ClusterOutageState()
-    var metadataStub = MetadataServiceGrpc.newBlockingStub(
-        ManagedChannelBuilder.forAddress(metadataConfig.masterAddress.host, metadataConfig.masterAddress.port)
-            .usePlaintext().build()
-    )
+    val metadataStub: MetadataServiceGrpc.MetadataServiceBlockingStub by lazy {
+        MetadataServiceGrpc.newBlockingStub(
+            ManagedChannelBuilder.forAddress(metadataConfig.masterAddress.host, metadataConfig.masterAddress.port)
+                .usePlaintext().build()
+        )
+    }
 
 
     private fun onShardingChange(nodes: List<NodeInfo>, request: ShardingChangeRequest) {
