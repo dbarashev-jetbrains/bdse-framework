@@ -2,13 +2,17 @@ package kvas.client
 
 import com.github.ajalt.clikt.core.*
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.arguments.multiple
+import com.github.ajalt.clikt.parameters.groups.OptionGroup
+import com.github.ajalt.clikt.parameters.groups.groupChoice
 import com.github.ajalt.clikt.parameters.options.default
-import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.choice
+import com.github.ajalt.clikt.parameters.types.double
 import com.github.ajalt.clikt.parameters.types.file
 import com.github.ajalt.clikt.parameters.types.int
+import com.github.ajalt.clikt.parameters.types.path
 import io.grpc.ManagedChannelBuilder
 import kvas.proto.*
 import kvas.proto.MapperGrpc.MapperBlockingStub
@@ -17,6 +21,17 @@ import kvas.setup.NotImplementedSharding
 import kvas.util.GrpcPoolImpl
 import kvas.util.NodeAddress
 import kvas.util.toNodeAddress
+import org.jetbrains.kotlinx.kandy.dsl.categorical
+import org.jetbrains.kotlinx.kandy.dsl.plot
+import org.jetbrains.kotlinx.kandy.letsplot.export.save
+import org.jetbrains.kotlinx.kandy.letsplot.layers.points
+import org.jetbrains.kotlinx.kandy.util.color.Color
+import java.math.BigDecimal
+import java.nio.file.Path
+import java.text.NumberFormat
+import kotlin.math.pow
+import kotlin.math.roundToLong
+import kotlin.random.Random
 
 /**
  * Entry point for the command-line application that interacts with a sharded key-value store using gRPC.
@@ -87,7 +102,7 @@ class Put : CliktCommand(name = "put") {
 
     val kvasClientFactory by requireObject<() -> KvasClient>()
     override fun run() {
-        kvasClientFactory().put(key, value)
+        kvasClientFactory().put(key, columnName = "", value = value)
         println("Kvas::putValue completed")
     }
 }
@@ -124,9 +139,21 @@ class Shell : CliktCommand(name = "shell") {
             } else {
                 val keyValue = input.split("=", limit = 2)
                 if (keyValue.size == 2) {
-                    kvasClient.put(keyValue[0], keyValue[1], writeNode.toWriteNodeSelector())
+                    val splitKey = keyValue[0].split(".", limit = 2)
+                    if (splitKey.size == 2) {
+                        kvasClient.put(key = splitKey[0], columnName = splitKey[1], value = keyValue[1], writeNode.toWriteNodeSelector())
+                    } else {
+                        kvasClient.put(key = keyValue[0], columnName = "", value = keyValue[1], writeNode.toWriteNodeSelector())
+
+                    }
                 } else {
-                    val value = kvasClient.get(keyValue[0])
+                    val splitKey = keyValue[0].split(".", limit = 2)
+                    val value = if (splitKey.size == 2) {
+                        kvasClient.get(splitKey[0], splitKey[1])
+                    } else {
+                        kvasClient.get(keyValue[0])
+
+                    }
                     println("$keyValue=$value")
                 }
             }
@@ -164,6 +191,64 @@ class Shell : CliktCommand(name = "shell") {
     }
 }
 
+enum class GenerateDataType {
+    TEXT, KMEANS
+}
+
+sealed class PayloadConfig: OptionGroup("payload")
+class WordcountConfig: PayloadConfig()
+class KmeansConfig: PayloadConfig() {
+    val clusterCount by option().int().default(2)
+    val pointsPerCluster by option().int().default(10)
+    val squareSize by option().int().default(20)
+    val clusterRadius by option().double().default(0.4)
+}
+
+class Generate: CliktCommand(name = "generate") {
+    val kvasClientFactory by requireObject<() -> KvasClient>()
+    val payloadOption by option("--payload").groupChoice(
+        "wordcount" to WordcountConfig(),
+        "kmeans" to KmeansConfig(),
+    )
+    val keyCount by option().int().default(1)
+
+    override fun run() {
+        val kvasClient = kvasClientFactory()
+        when (val payload = payloadOption) {
+            is WordcountConfig ->  {
+                (1..keyCount).forEach {
+                    kvasClient.put("$it", "", generateRandomPhrase())
+                }
+            }
+            is KmeansConfig -> {
+                val centroids = (1..payload.clusterCount).map {
+                    Random.nextDouble(0.0, payload.squareSize.toDouble()).round(3) to Random.nextDouble(0.0, payload.squareSize.toDouble()).round(3)
+                }
+                centroids.forEachIndexed { idx, c ->
+                    kvasClient.put("centroid_$idx", "x", c.first.toString())
+                    kvasClient.put("centroid_$idx", "y", c.second.toString())
+                }
+                val gaussian = java.util.Random()
+                val points = (1..payload.clusterCount*payload.pointsPerCluster).map {
+                    val centroid = centroids.random()
+                    val x = gaussian.nextGaussian(centroid.first, payload.clusterRadius).round(3)
+                    val y = gaussian.nextGaussian(centroid.second, payload.clusterRadius).round(3)
+                    x to y
+                }
+                points.forEachIndexed { idx, p ->
+                    kvasClient.put("point_$idx", "x", p.first.toString())
+                    kvasClient.put("point_$idx", "y", p.second.toString())
+                }
+                println("centroids=$centroids")
+                println("points=$points")
+            }
+            else -> {
+                val f = java.io.File("cluster_.txt")
+                f.writeText(listOf(1,2,3).joinToString("\n"))
+            }
+        }
+    }
+}
 /**
  * The `LoadTestCommand` class is a command-line tool used to perform load testing
  * on a backend system. It generates and executes a workload against the backend
@@ -175,10 +260,9 @@ class LoadTestCommand : CliktCommand(name = "loadtest") {
     val clientCount by option().int().default(1)
     val workload by option().choice("READONLY", "MIXED").default("MIXED")
     val writeNode by option().choice("leader", "random", "raft").default("leader")
-    val randomValues by option().flag()
 
     override fun run() {
-        val loadTest = LoadTest(Workload.valueOf(workload), keyCount, clientCount, randomValues) {
+        val loadTest = LoadTest(Workload.valueOf(workload), keyCount, clientCount) {
             KvasBackend(kvasClientFactory(), writeNode.toWriteNodeSelector())
         }
         loadTest.generateWorkload()
@@ -189,6 +273,46 @@ class LoadTestCommand : CliktCommand(name = "loadtest") {
     }
 }
 
+class Plot: CliktCommand(name = "plot") {
+    val files: List<Path> by argument().path(mustExist = true, canBeDir = false).multiple()
+
+    override fun run() {
+        val xes = mutableListOf<Double>()
+        val yes = mutableListOf<Double>()
+        val clusters = mutableListOf<String>()
+        val colors = mutableListOf<Pair<String, Color>>()
+        files.forEach { path ->
+            println("Reading $path")
+            val f = path.toFile()
+            val clusterNum = f.name.split("_")[1]
+
+
+            f.readLines().forEach { line ->
+                val points = line.split(",", limit = 2)
+                xes.add(points[0].toDouble())
+                yes.add(points[1].toDouble())
+                clusters.add(clusterNum)
+                colors.add(
+                    clusterNum to Color.rgb(
+                        Random.nextInt(0, 255), Random.nextInt(0, 255), Random.nextInt(0, 255)))
+            }
+        }
+        val dataSet = mapOf(
+            "x" to xes,
+            "y" to yes,
+            "cluster" to clusters
+        )
+        plot(dataSet) {
+            points {
+                x("x")
+                y("y")
+                color("cluster") {
+                    scale = categorical(*colors.toTypedArray())
+                }
+            }
+        }.save("plot.png")
+    }
+}
 class MapReduce : CliktCommand(name = "mapreduce") {
     val kvasClientFactory by requireObject<() -> KvasClient>()
     val script by option().file(mustExist = true, canBeDir = false).required()
@@ -231,4 +355,10 @@ private fun String.toWriteNodeSelector() = when (this) {
     else -> throw IllegalArgumentException("Unknown write node selector: $this")
 }
 
-fun main(args: Array<String>) = Main().subcommands(Get(), Put(), Shell(), LoadTestCommand(), MapReduce()).main(args)
+fun main(args: Array<String>) = Main().subcommands(Get(), Put(), Shell(), LoadTestCommand(), MapReduce(), Generate(), Plot()).main(args)
+
+
+fun Double.round(decimals: Int): Double {
+    val multiplier = 10.toDouble().pow(decimals)
+    return (this * multiplier).roundToLong() / multiplier
+}
