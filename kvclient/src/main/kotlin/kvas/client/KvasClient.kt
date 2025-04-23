@@ -56,7 +56,7 @@ class KvasClient(
         dataStubFactory(address.toNodeAddress())
     }
 
-    fun get(key: String, attempt: Int = 0): String? {
+    fun get(key: String, columnName: String = "", attempt: Int = 0): String? {
         if (attempt == 5) {
             error("Failed to get a value by key $key in 5 attempts. Giving up.")
         }
@@ -65,6 +65,7 @@ class KvasClient(
             println("GET: key=$key  node=${randomGetNode.nodeAddress}")
             val resp = getNodeStub(randomGetNode.nodeAddress).getValue(getValueRequest {
                 this.rowKey = key
+                this.columnName = columnName
                 this.shardToken = shard.shardToken
             })
             return when (resp.code) {
@@ -72,7 +73,7 @@ class KvasClient(
                 KvasProto.GetValueResponse.StatusCode.REFRESH_SHARDS -> {
                     LOG.info("GET: got REFRESH_SHARDS response")
                     updateMetadata()
-                    get(key, attempt + 1)
+                    get(key, columnName, attempt + 1)
                 }
 
                 KvasProto.GetValueResponse.StatusCode.STORAGE_ERROR -> {
@@ -85,15 +86,15 @@ class KvasClient(
         }
     }
 
-    fun put(key: String, value: String, nodeSelector: (ReplicatedShard)->NodeInfo = LEADER_NODE_SELECTOR) {
-        PutTask(key, value, nodeSelector).run()
+    fun put(key: String, columnName: String, value: String, nodeSelector: (ReplicatedShard)->NodeInfo = LEADER_NODE_SELECTOR) {
+        PutTask(key, columnName, value, nodeSelector).run()
     }
 
     /**
      * PUT requests may be redirected, and we need to keep additional state to detect possible redirect loops.
      * That's why there is a separate object for executing a PUT request.
      */
-    inner class PutTask(private val key: String, private val value: String, private val nodeSelector: (ReplicatedShard) -> NodeInfo) {
+    inner class PutTask(private val key: String, private val columnName: String, private val value: String, private val nodeSelector: (ReplicatedShard) -> NodeInfo) {
         private var refreshCount = 0
         private val redirectChain = mutableSetOf<String>()
 
@@ -111,6 +112,7 @@ class KvasClient(
             try {
                 val resp = node.putValue(putValueRequest {
                     this.rowKey = key
+                    this.columnName = this@PutTask.columnName
                     this.shardToken = shard.shardToken
                     this.value = value
                 })

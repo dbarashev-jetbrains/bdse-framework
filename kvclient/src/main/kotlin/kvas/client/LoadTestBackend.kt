@@ -30,7 +30,7 @@ class DummyBackend : Backend {
 class KvasBackend(private val client: KvasClient, private val writeNodeSelector: (ReplicatedShard)->NodeInfo) : Backend {
     override val stats: String = ""
     override fun put(key: String, value: String) {
-        client.put(key, value, writeNodeSelector)
+        client.put(key, columnName = "", value, writeNodeSelector)
     }
 
     override fun get(key: String) = client.get(key)

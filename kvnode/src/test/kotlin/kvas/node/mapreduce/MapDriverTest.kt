@@ -16,32 +16,74 @@ class MapDriverTest {
         val storage = InMemoryStorage()
         storage.put("line1", DEFAULT_COLUMN_NAME, "lorem ipsum dolor sit amet")
         storage.put("line2", DEFAULT_COLUMN_NAME, "consectetur adipiscing elit")
-        
+
+        val sharedStorage = InMemoryStorage()
         val mapOutputStorage = InMemoryStorage()
         val mapper = MapperImpl(
             NodeAddress("127.0.0.1", 9000),
             storage,
             DemoMapDriver(mapOutputStorage, AllShardings.NAIVE.second),
             Runnable::run,
-            { _, _ -> addMapOutputShardResponse {} }
+            { _, _ -> addMapOutputShardResponse {} },
+            {sharedStorage},
         )
         runBlocking {
             mapper.startMap(startMapRequest {
                 metadata = createMetadata(1)
                 mapFunction = """
-                    fun mapper(rowKey: String, values: Map<String, String>): List<Pair<String, Any?>> {
+                    fun mapper(rowKey: String, values: Map<String, String>, storage: kvas.node.storage.Storage): List<Pair<String, Any?>> {
                       return listOf(rowKey to 1)
                     }
                 """.trimIndent()
             })
         }
         val outputShard: Map<String, Any> = mapOutputStorage.scan().use {
-            it.asSequence().associate<DataRow, String, Any> {
-                row -> row.key to row.valuesMap[DEFAULT_COLUMN_NAME]!!
+            it.asSequence().associate<DataRow, String, Any?> {
+                row -> row.key to row.valuesMap["value0"]
             }
-        }
+        }.mapNotNull { (k, v) -> v?.let { k to v } }.toMap()
         assertEquals<Map<String, Any>>(
             mapOf("line1" to "1", "line2" to "1"),
+            outputShard
+        )
+    }
+
+    @Test
+    fun `test duplicated values for key`() {
+        val storage = InMemoryStorage()
+        storage.put("line1", DEFAULT_COLUMN_NAME, "lorem ipsum")
+        storage.put("line2", DEFAULT_COLUMN_NAME, "lorem ipsum")
+
+        val sharedStorage = InMemoryStorage()
+        val mapOutputStorage = InMemoryStorage()
+        val mapper = MapperImpl(
+            NodeAddress("127.0.0.1", 9000),
+            storage,
+            DemoMapDriver(mapOutputStorage, AllShardings.NAIVE.second),
+            Runnable::run,
+            { _, _ -> addMapOutputShardResponse {} },
+            {sharedStorage},
+        )
+        runBlocking {
+            mapper.startMap(startMapRequest {
+                metadata = createMetadata(1)
+                mapFunction = """
+                    fun mapper(rowKey: String, values: Map<String, String>, storage: kvas.node.storage.Storage): List<Pair<String, Any?>> {
+                      return values[""]!!.split(" ").map { it to 1 }.toList()
+                    }
+                """.trimIndent()
+            })
+        }
+        val outputShard = mapOutputStorage.scan().use {
+            it.asSequence().toSet()
+        }
+        assertEquals(setOf(
+            DataRow.newBuilder().setKey("lorem")
+                .putValues("value0", "1")
+                .putValues("value1", "1").putValues("valueCount", "2").setVersion(4).build(),
+            DataRow.newBuilder().setKey("ipsum")
+                .putValues("value0", "1")
+                .putValues("value1", "1").putValues("valueCount", "2").setVersion(4).build()),
             outputShard
         )
     }

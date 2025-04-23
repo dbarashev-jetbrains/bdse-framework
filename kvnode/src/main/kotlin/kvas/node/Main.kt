@@ -15,16 +15,22 @@ import com.github.ajalt.clikt.parameters.types.file
 import com.github.ajalt.clikt.parameters.types.int
 import io.grpc.ManagedChannelBuilder
 import io.grpc.ServerBuilder
+import kvas.client.KvasClient
 import kvas.node.mapreduce.MapDrivers
 import kvas.node.mapreduce.MapperImpl
 import kvas.node.mapreduce.ReduceDrivers
 import kvas.node.mapreduce.ReducerImpl
 import kvas.node.raft.*
 import kvas.node.storage.*
+import kvas.proto.DataServiceGrpc
+import kvas.proto.DataServiceGrpcKt
 import kvas.proto.KvasMetadataProto.NodeInfo
 import kvas.proto.KvasProto.ShardingChangeRequest
 import kvas.proto.MetadataListenerGrpc
 import kvas.proto.MetadataServiceGrpc
+import kvas.proto.OutageEmulatorServiceGrpc
+import kvas.proto.StatisticsGrpc
+import kvas.proto.StatisticsGrpcKt
 import kvas.setup.AllShardings
 import kvas.setup.NaiveSharding
 import kvas.setup.NotImplementedSharding
@@ -125,8 +131,39 @@ internal class KvasNodeBuilder {
         val reduceDriver = ReduceDrivers.ALL[mapReduceConfig.drivers]?.let { driverFactory ->
             driverFactory(this.storageFactory(), this.storageFactory())
         }
-        grpcBuilder.addService(MapperImpl(selfAddress, storage, mapDriver!!, Executors.newSingleThreadExecutor()))
-        grpcBuilder.addService(ReducerImpl(selfAddress, storage, reduceDriver!!, Executors.newCachedThreadPool()))
+        val kvasClient by lazy {
+            KvasClient(
+                this.sharding, this.metadataConfig.masterAddress,
+                metadataStubFactory = { this.metadataStub },
+                dataStubFactory = { address ->
+                    DataServiceGrpc.newBlockingStub(
+                        ManagedChannelBuilder.forAddress(address.host, address.port)
+                            .usePlaintext().build()
+                    )
+                },
+                statisticsFactory = { address ->
+                    StatisticsGrpc.newBlockingStub(
+                        ManagedChannelBuilder.forAddress(
+                            address.host,
+                            address.port
+                        ).usePlaintext().build()
+                    )
+                },
+                outageEmulatorFactory = { address ->
+                    OutageEmulatorServiceGrpc.newBlockingStub(
+                        ManagedChannelBuilder.forAddress(
+                            address.host,
+                            address.port
+                        ).usePlaintext().build()
+                    )
+                }
+            )
+        }
+        val sharedStorage = {
+            KvasStorageImpl(kvasClient)
+        }
+        grpcBuilder.addService(MapperImpl(selfAddress, storage, mapDriver!!, Executors.newSingleThreadExecutor(), sharedStorage = sharedStorage))
+        grpcBuilder.addService(ReducerImpl(selfAddress, sharedStorage = sharedStorage, reduceDriver!!, Executors.newCachedThreadPool()))
     }
 
     fun addRaftServices(grpcBuilder: ServerBuilder<*>) {

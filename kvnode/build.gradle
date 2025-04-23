@@ -10,6 +10,7 @@ addCommonLibs(project)
 
 dependencies {
     implementation project(':kvproto')
+    implementation project(':kvclient')
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.7.1'

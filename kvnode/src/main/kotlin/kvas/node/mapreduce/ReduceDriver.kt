@@ -58,7 +58,7 @@ object ReduceDrivers {
  */
 class ReducerImpl(
     private val selfAddress: NodeAddress,
-    private val storage: Storage,
+    private val sharedStorage: ()->Storage,
     private val reduceDriver: ReduceDriver,
     private val shardTransferExecutor: Executor
 ): ReducerGrpcKt.ReducerCoroutineImplBase() {
@@ -103,7 +103,7 @@ class ReducerImpl(
             val json = Json { ignoreUnknownKeys = true }
             reduceDriver.forEachReduceTask { key, values ->
                 val jsonValues = values.map { json.parseToJsonElement(it) }.toList()
-                val result = inv.invokeFunction("reducer", key, jsonValues)
+                val result = inv.invokeFunction("reducer", key, jsonValues, this.sharedStorage.invoke())
                 reduceDriver.writeReduceOutput(key, result)
             }
             LOG.info("REDUCE FINISHED")

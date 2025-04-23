@@ -1,7 +1,9 @@
 package kvas.node.mapreduce
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import kvas.node.storage.DEFAULT_COLUMN_NAME
@@ -19,6 +21,7 @@ import org.slf4j.LoggerFactory
 import java.util.concurrent.Executor
 import javax.script.Invocable
 import javax.script.ScriptEngineManager
+import kotlin.text.toInt
 
 typealias MapperOutput = List<Pair<String, Any?>>
 
@@ -79,8 +82,8 @@ class MapperImpl(
     /** Executor to run the map process */
     private val executor: Executor,
     /** A function that sends a blocking AddMapOutputShard gRPC request to  the given reducer service */
-    private val grpcAddMapOutputShard: GrpcAddMapOutputShard? = null
-
+    private val grpcAddMapOutputShard: GrpcAddMapOutputShard? = null,
+    private val sharedStorage: ()->Storage,
     ) : MapperGrpcKt.MapperCoroutineImplBase() {
     private val reducerGrpcPool: GrpcPool<ReducerGrpc.ReducerBlockingStub> =
         GrpcPoolImpl<ReducerGrpc.ReducerBlockingStub>(selfAddress) { channel ->
@@ -97,7 +100,7 @@ class MapperImpl(
             LOG.info("MAPPER STARTED")
             storage.scan().use { scan ->
                 scan.forEach { row ->
-                    val result = inv.invokeFunction("mapper", row.key, row.valuesMap)
+                    val result = inv.invokeFunction("mapper", row.key, row.valuesMap, this.sharedStorage.invoke())
                     (result as? MapperOutput)?.forEach { (key, value) ->
                         mapDriver.writeMapOutput(key, value)
                     }
@@ -138,12 +141,19 @@ class DemoMapDriver(private val storage: Storage, private val sharding: Sharding
     override fun writeMapOutput(key: String, value: Any?) {
         val json = Json { ignoreUnknownKeys = true }
         val jsonValue = json.encodeToString(AnySerializer, value)
-        storage.put(key, columnName = DEFAULT_COLUMN_NAME, jsonValue)
+        val valueCount = storage.get(key, "valueCount")?.toInt() ?: 0
+        storage.put(key, "valueCount", (valueCount + 1).toString())
+        storage.put(key, "value$valueCount", jsonValue)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun getMapOutputShard(reducerAddress: NodeAddress): Flow<DataRow> {
         return storage.scan().use {
-            it.asFlow().map { DataRow.newBuilder().setKey(it.key).putAllValues(it.valuesMap).build() }
+            it.asFlow().flatMapConcat {
+                it.valuesMap.entries.filter {it.key != "valueCount"}.asFlow().map { v ->
+                    DataRow.newBuilder().setKey(it.key).putValues(DEFAULT_COLUMN_NAME, v.value).build()
+                }
+            }
         }
     }
 }
