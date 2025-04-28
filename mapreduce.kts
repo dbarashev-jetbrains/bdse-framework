@@ -7,5 +7,7 @@ fun mapper(rowKey: String, values: Map<String, String>, sharedStorage: Storage):
 }
 
 fun reducer(reduceKey: String, values: List<Any>, sharedStorage: Storage): Any {
-  return values.sumOf { (it as JsonElement).jsonPrimitive.int }
+  val result = values.sumOf { (it as JsonElement).jsonPrimitive.int }
+  sharedStorage.put("#$reduceKey", "", result.toString())
+  return result
 }
