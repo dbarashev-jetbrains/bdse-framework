@@ -25,6 +25,7 @@ class KvasClient(
     private val sharding: Sharding,
     metadataAddress: NodeAddress,
     metadataStubFactory: (NodeAddress) -> MetadataServiceGrpc.MetadataServiceBlockingStub,
+    private val writeNodeSelector: (ReplicatedShard) -> NodeInfo = LEADER_NODE_SELECTOR,
     private val dataStubFactory: (NodeAddress) -> DataServiceGrpc.DataServiceBlockingStub,
     private val statisticsFactory: (NodeAddress) -> StatisticsGrpc.StatisticsBlockingStub,
     private val outageEmulatorFactory: (NodeAddress) -> OutageEmulatorServiceGrpc.OutageEmulatorServiceBlockingStub
@@ -56,7 +57,9 @@ class KvasClient(
         dataStubFactory(address.toNodeAddress())
     }
 
-    fun get(key: String, columnName: String = "", attempt: Int = 0): String? {
+    fun get(key: String, columnName: String = ""): String? = doGet(key, columnName, 0)
+
+    fun doGet(key: String, columnName: String = "", attempt: Int = 0): String? {
         if (attempt == 5) {
             error("Failed to get a value by key $key in 5 attempts. Giving up.")
         }
@@ -73,7 +76,7 @@ class KvasClient(
                 KvasProto.GetValueResponse.StatusCode.REFRESH_SHARDS -> {
                     LOG.info("GET: got REFRESH_SHARDS response")
                     updateMetadata()
-                    get(key, columnName, attempt + 1)
+                    doGet(key, columnName, attempt + 1)
                 }
 
                 KvasProto.GetValueResponse.StatusCode.STORAGE_ERROR -> {
@@ -86,8 +89,8 @@ class KvasClient(
         }
     }
 
-    fun put(key: String, columnName: String, value: String, nodeSelector: (ReplicatedShard)->NodeInfo = LEADER_NODE_SELECTOR) {
-        PutTask(key, columnName, value, nodeSelector).run()
+    fun put(key: String, columnName: String, value: String) {
+        PutTask(key, columnName, value, writeNodeSelector).run()
     }
 
     /**

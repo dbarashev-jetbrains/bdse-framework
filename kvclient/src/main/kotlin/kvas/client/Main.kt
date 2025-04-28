@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.parameters.arguments.multiple
 import com.github.ajalt.clikt.parameters.groups.OptionGroup
 import com.github.ajalt.clikt.parameters.groups.groupChoice
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.choice
@@ -26,9 +27,7 @@ import org.jetbrains.kotlinx.kandy.dsl.plot
 import org.jetbrains.kotlinx.kandy.letsplot.export.save
 import org.jetbrains.kotlinx.kandy.letsplot.layers.points
 import org.jetbrains.kotlinx.kandy.util.color.Color
-import java.math.BigDecimal
 import java.nio.file.Path
-import java.text.NumberFormat
 import kotlin.math.pow
 import kotlin.math.roundToLong
 import kotlin.random.Random
@@ -42,6 +41,7 @@ class Main : CliktCommand() {
     val shardingConfig by option("--sharding").choice(
         *AllShardings.ALL.keys.toTypedArray()
     ).default(AllShardings.NAIVE.first)
+    val writeNode by option().choice("leader", "random").default("leader")
 
     // Client factory for the subcommands.
     val kvasClientFactory by findOrSetObject {
@@ -55,23 +55,24 @@ class Main : CliktCommand() {
     private fun createKvasClient() =
         KvasClient(
             AllShardings.ALL[shardingConfig] ?: NotImplementedSharding,
-            metadataAddress.toNodeAddress(),
-            { nodeAddress ->
+            metadataAddress = metadataAddress.toNodeAddress(),
+            metadataStubFactory = { nodeAddress ->
                 MetadataServiceGrpc.newBlockingStub(
                     ManagedChannelBuilder.forAddress(nodeAddress.host, nodeAddress.port).usePlaintext().build()
                 )
             },
-            { nodeAddress ->
+            writeNodeSelector = writeNode.toWriteNodeSelector(),
+            dataStubFactory = { nodeAddress ->
                 DataServiceGrpc.newBlockingStub(
                     ManagedChannelBuilder.forAddress(nodeAddress.host, nodeAddress.port).usePlaintext().build()
                 )
             },
-            { nodeAddress ->
+            statisticsFactory = { nodeAddress ->
                 StatisticsGrpc.newBlockingStub(
                     ManagedChannelBuilder.forAddress(nodeAddress.host, nodeAddress.port).usePlaintext().build()
                 )
             },
-            { nodeAddress ->
+            outageEmulatorFactory = { nodeAddress ->
                 OutageEmulatorServiceGrpc.newBlockingStub(
                     ManagedChannelBuilder.forAddress(nodeAddress.host, nodeAddress.port).usePlaintext().build())
             }
@@ -88,7 +89,7 @@ class Get : CliktCommand(name = "get") {
     val kvasClientFactory by requireObject<() -> KvasClient>()
 
     override fun run() {
-        println(kvasClientFactory().get(key))
+        println(kvasClientFactory().doGet(key))
     }
 }
 
@@ -107,6 +108,75 @@ class Put : CliktCommand(name = "put") {
     }
 }
 
+interface GetPutParser {
+    fun parse(input: String)
+}
+
+class SimpleGetPutParser(private val kvasClient: KvasClient): GetPutParser {
+    override fun parse(input: String) {
+        val keyValue = input.split("=", limit = 2)
+        if (keyValue.size == 2) {
+            val splitKey = keyValue[0].split(".", limit = 2)
+            if (splitKey.size == 2) {
+                kvasClient.put(key = splitKey[0], columnName = splitKey[1], value = keyValue[1])
+            } else {
+                kvasClient.put(key = keyValue[0], columnName = "", value = keyValue[1])
+
+            }
+        } else {
+            val splitKey = keyValue[0].split(".", limit = 2)
+            val value = if (splitKey.size == 2) {
+                kvasClient.doGet(splitKey[0], splitKey[1])
+            } else {
+                kvasClient.doGet(keyValue[0])
+
+            }
+            println("$keyValue=$value")
+        }
+    }
+}
+
+class VersionedGetPutParser(private val kvasClient: VersionedKvasClient): GetPutParser {
+    override fun parse(input: String) {
+        var rowKey = ""
+        var columnName = ""
+        var value = ""
+        var version: Int? = null
+
+        val keyValue = input.split("=", limit = 2)
+        if (keyValue.size == 2) {
+            value = keyValue[1]
+            val splitKey = keyValue[0].split(".", limit = 2)
+            if (splitKey.size == 2) {
+                columnName = splitKey[1]
+            }
+            val splitRowKey = splitKey[0].split("@", limit = 2)
+            if (splitRowKey.size == 2) {
+                version = splitRowKey[1].toIntOrNull()
+            }
+            rowKey = splitRowKey[0]
+            kvasClient.put(rowKey, columnName, value, version)
+        } else {
+            val splitKey = keyValue[0].split(".", limit = 2)
+            if (splitKey.size == 2) {
+                columnName = splitKey[1]
+            }
+            val splitRowKey = splitKey[0].split("@", limit = 2)
+            if (splitRowKey.size == 2) {
+                version = splitRowKey[1].toIntOrNull()
+            }
+            rowKey = splitRowKey[0]
+            val value = kvasClient.get(rowKey, columnName, version)
+            println("$keyValue=$value")
+        }
+    }
+}
+
+class PercolatorGetPutParser(private val versionedKvasClient: VersionedKvasClient): GetPutParser {
+    override fun parse(input: String) {
+        TODO("Not yet implemented")
+    }
+}
 /**
  * Represents a shell interface for interacting with a KVAS instance.
  *
@@ -116,7 +186,7 @@ class Put : CliktCommand(name = "put") {
  * - Pressing Enter or providing an empty line to exit the shell.
  */
 class Shell : CliktCommand(name = "shell") {
-    val writeNode by option().choice("leader", "random").default("leader")
+    val mode by option().choice("simple", "versioned", "percolator").default("simple")
     val kvasClientFactory by requireObject<() -> KvasClient>()
     override fun run() {
         println(
@@ -129,6 +199,11 @@ class Shell : CliktCommand(name = "shell") {
       """.trimIndent()
         )
         val kvasClient = kvasClientFactory()
+        val getPutParser = when (mode) {
+            "versioned" -> VersionedGetPutParser(VersionedKvasClient(kvasClient))
+            "percolator" -> PercolatorGetPutParser(VersionedKvasClient(kvasClient))
+            else -> SimpleGetPutParser(kvasClient)
+        }
         while (true) {
             val input = readlnOrNull() ?: break
             if (input.isBlank()) {
@@ -137,25 +212,7 @@ class Shell : CliktCommand(name = "shell") {
             if (input.startsWith("/")) {
                 processCommand(input, kvasClient)
             } else {
-                val keyValue = input.split("=", limit = 2)
-                if (keyValue.size == 2) {
-                    val splitKey = keyValue[0].split(".", limit = 2)
-                    if (splitKey.size == 2) {
-                        kvasClient.put(key = splitKey[0], columnName = splitKey[1], value = keyValue[1], writeNode.toWriteNodeSelector())
-                    } else {
-                        kvasClient.put(key = keyValue[0], columnName = "", value = keyValue[1], writeNode.toWriteNodeSelector())
-
-                    }
-                } else {
-                    val splitKey = keyValue[0].split(".", limit = 2)
-                    val value = if (splitKey.size == 2) {
-                        kvasClient.get(splitKey[0], splitKey[1])
-                    } else {
-                        kvasClient.get(keyValue[0])
-
-                    }
-                    println("$keyValue=$value")
-                }
+                getPutParser.parse(input)
             }
         }
     }
@@ -259,11 +316,10 @@ class LoadTestCommand : CliktCommand(name = "loadtest") {
     val keyCount by option().int().default(1)
     val clientCount by option().int().default(1)
     val workload by option().choice("READONLY", "MIXED").default("MIXED")
-    val writeNode by option().choice("leader", "random", "raft").default("leader")
 
     override fun run() {
         val loadTest = LoadTest(Workload.valueOf(workload), keyCount, clientCount) {
-            KvasBackend(kvasClientFactory(), writeNode.toWriteNodeSelector())
+            KvasBackend(kvasClientFactory())
         }
         loadTest.generateWorkload()
         kvasClientFactory().getNodeStatistics().forEach {
@@ -313,6 +369,7 @@ class Plot: CliktCommand(name = "plot") {
         }.save("plot.png")
     }
 }
+
 class MapReduce : CliktCommand(name = "mapreduce") {
     val kvasClientFactory by requireObject<() -> KvasClient>()
     val script by option().file(mustExist = true, canBeDir = false).required()

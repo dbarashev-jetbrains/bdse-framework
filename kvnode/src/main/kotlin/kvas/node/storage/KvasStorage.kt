@@ -8,7 +8,7 @@ class KvasStorageImpl(private val kvasClient: KvasClient): Storage {
     }
 
     override fun get(rowKey: String, columnName: String): String? {
-        return kvasClient.get(rowKey, columnName)
+        return kvasClient.doGet(rowKey, columnName)
     }
 
     override fun getRow(rowKey: String): StoredRow? {
