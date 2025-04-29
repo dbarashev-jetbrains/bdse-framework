@@ -6,7 +6,6 @@ import com.github.ajalt.clikt.parameters.arguments.multiple
 import com.github.ajalt.clikt.parameters.groups.OptionGroup
 import com.github.ajalt.clikt.parameters.groups.groupChoice
 import com.github.ajalt.clikt.parameters.options.default
-import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.choice
@@ -108,75 +107,6 @@ class Put : CliktCommand(name = "put") {
     }
 }
 
-interface GetPutParser {
-    fun parse(input: String)
-}
-
-class SimpleGetPutParser(private val kvasClient: KvasClient): GetPutParser {
-    override fun parse(input: String) {
-        val keyValue = input.split("=", limit = 2)
-        if (keyValue.size == 2) {
-            val splitKey = keyValue[0].split(".", limit = 2)
-            if (splitKey.size == 2) {
-                kvasClient.put(key = splitKey[0], columnName = splitKey[1], value = keyValue[1])
-            } else {
-                kvasClient.put(key = keyValue[0], columnName = "", value = keyValue[1])
-
-            }
-        } else {
-            val splitKey = keyValue[0].split(".", limit = 2)
-            val value = if (splitKey.size == 2) {
-                kvasClient.doGet(splitKey[0], splitKey[1])
-            } else {
-                kvasClient.doGet(keyValue[0])
-
-            }
-            println("$keyValue=$value")
-        }
-    }
-}
-
-class VersionedGetPutParser(private val kvasClient: VersionedKvasClient): GetPutParser {
-    override fun parse(input: String) {
-        var rowKey = ""
-        var columnName = ""
-        var value = ""
-        var version: Int? = null
-
-        val keyValue = input.split("=", limit = 2)
-        if (keyValue.size == 2) {
-            value = keyValue[1]
-            val splitKey = keyValue[0].split(".", limit = 2)
-            if (splitKey.size == 2) {
-                columnName = splitKey[1]
-            }
-            val splitRowKey = splitKey[0].split("@", limit = 2)
-            if (splitRowKey.size == 2) {
-                version = splitRowKey[1].toIntOrNull()
-            }
-            rowKey = splitRowKey[0]
-            kvasClient.put(rowKey, columnName, value, version)
-        } else {
-            val splitKey = keyValue[0].split(".", limit = 2)
-            if (splitKey.size == 2) {
-                columnName = splitKey[1]
-            }
-            val splitRowKey = splitKey[0].split("@", limit = 2)
-            if (splitRowKey.size == 2) {
-                version = splitRowKey[1].toIntOrNull()
-            }
-            rowKey = splitRowKey[0]
-            val value = kvasClient.get(rowKey, columnName, version)
-            println("$keyValue=$value")
-        }
-    }
-}
-
-class PercolatorGetPutParser(private val versionedKvasClient: VersionedKvasClient): GetPutParser {
-    override fun parse(input: String) {
-        TODO("Not yet implemented")
-    }
-}
 /**
  * Represents a shell interface for interacting with a KVAS instance.
  *
@@ -185,8 +115,9 @@ class PercolatorGetPutParser(private val versionedKvasClient: VersionedKvasClien
  * - Typing a key-value pair (`<KEY>=<VALUE>`) to execute a PUT request and store the value in the system.
  * - Pressing Enter or providing an empty line to exit the shell.
  */
-class Shell : CliktCommand(name = "shell") {
+class ShellCommand : CliktCommand(name = "shell") {
     val mode by option().choice("simple", "versioned", "percolator").default("simple")
+    val percolatorImpl by option("--impl").choice(*PercolatorProtocols.ALL.keys.toTypedArray()).default(PercolatorProtocols.DEMO.first)
     val kvasClientFactory by requireObject<() -> KvasClient>()
     override fun run() {
         println(
@@ -199,53 +130,14 @@ class Shell : CliktCommand(name = "shell") {
       """.trimIndent()
         )
         val kvasClient = kvasClientFactory()
-        val getPutParser = when (mode) {
-            "versioned" -> VersionedGetPutParser(VersionedKvasClient(kvasClient))
-            "percolator" -> PercolatorGetPutParser(VersionedKvasClient(kvasClient))
-            else -> SimpleGetPutParser(kvasClient)
+        val shell = when (mode) {
+            "versioned" -> VersionedShell(VersionedKvasClient(kvasClient))
+            "percolator" -> PercolatorShell(VersionedKvasClient(kvasClient), percolatorImpl)
+            else -> SimpleShell(kvasClient)
         }
-        while (true) {
-            val input = readlnOrNull() ?: break
-            if (input.isBlank()) {
-                break
-            }
-            if (input.startsWith("/")) {
-                processCommand(input, kvasClient)
-            } else {
-                getPutParser.parse(input)
-            }
-        }
+        shell.mainLoop()
     }
 
-    private fun processCommand(input: String, kvasClient: KvasClient) {
-        val words = input.split(" ")
-        when (words[0]) {
-            "/exit" -> System.exit(0)
-            "/offline" -> {
-                setAvailable(kvasClient, words.drop(1), false)
-            }
-            "/online" -> {
-                setAvailable(kvasClient, words.drop(1), true)
-            }
-        }
-    }
-
-    private fun setAvailable(kvasClient: KvasClient, words: List<String>, isAvailable: Boolean) {
-        if (words.isEmpty()) {
-            println("Invalid number of arguments")
-            return
-        }
-        words.forEach { word ->
-            if (word.indexOf("..") < 0) {
-                kvasClient.sendNodeAvailable(word, isAvailable)
-            } else {
-                val (src, dst) = word.split("..", limit = 2)
-                kvasClient.sendLinkAvailable(src, dst, isAvailable)
-                kvasClient.sendLinkAvailable(dst, src, isAvailable)
-            }
-        }
-
-    }
 }
 
 enum class GenerateDataType {
@@ -412,7 +304,7 @@ private fun String.toWriteNodeSelector() = when (this) {
     else -> throw IllegalArgumentException("Unknown write node selector: $this")
 }
 
-fun main(args: Array<String>) = Main().subcommands(Get(), Put(), Shell(), LoadTestCommand(), MapReduce(), Generate(), Plot()).main(args)
+fun main(args: Array<String>) = Main().subcommands(Get(), Put(), ShellCommand(), LoadTestCommand(), MapReduce(), Generate(), Plot()).main(args)
 
 
 fun Double.round(decimals: Int): Double {
